@@ -1,0 +1,29 @@
+{
+  "name": "ai-mission-control",
+  "version": "1.0.0",
+  "description": "Creator & AI Pipeline Command Center",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev:vite": "vite",
+    "dev:electron": "wait-on tcp:5173 && electron . --dev",
+    "dev": "concurrently -k -p \"[{name}]\" -n \"Vite,Electron\" -c \"cyan.bold,green.bold\" \"vite\" \"npm run dev:electron\"",
+    "build:vite": "vite build",
+    "build": "vite build",
+    "start": "electron ."
+  },
+  "dependencies": {
+    "lucide-react": "^0.475.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "concurrently": "^9.1.2",
+    "electron": "^34.2.0",
+    "postcss": "^8.5.1",
+    "tailwindcss": "^3.4.17",
+    "vite": "^6.1.0",
+    "wait-on": "^8.0.2"
+  }
+}
