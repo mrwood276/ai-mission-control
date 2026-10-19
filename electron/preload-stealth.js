@@ -1,5 +1,4 @@
-// Preload stealth script: Executes before any web page scripts run
-const { contextBridge } = require('electron');
+const { contextBridge, webFrame } = require('electron');
 
 function applyStealthPatches(config = {}) {
   const chromeFullVersion = config.chromeFullVersion || '132.0.0.0';
@@ -147,6 +146,10 @@ try {
       func: applyStealthPatches,
       args: [versionConfig],
     });
+  } else if (webFrame && typeof webFrame.executeJavaScriptInIsolatedWorld === 'function') {
+    webFrame.executeJavaScriptInIsolatedWorld(0, [
+      { code: `(${applyStealthPatches.toString()})(${JSON.stringify(versionConfig)});` }
+    ]);
   } else {
     applyStealthPatches(versionConfig);
   }
