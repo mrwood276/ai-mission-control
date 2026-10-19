@@ -116,6 +116,22 @@ function applyStealthPatches(config = {}) {
         } catch (err) {}
       }
     }
+
+    // 4. Disable PublicKeyCredential on accounts.google.com to prevent Windows Security Bluetooth/Passkey dialogs
+    if (typeof window !== 'undefined' && typeof location !== 'undefined') {
+      if (location.hostname === 'accounts.google.com') {
+        try {
+          delete window.PublicKeyCredential;
+        } catch (e) {}
+        try {
+          Object.defineProperty(window, 'PublicKeyCredential', {
+            get: () => undefined,
+            set: () => {},
+            configurable: true,
+          });
+        } catch (e) {}
+      }
+    }
   } catch (err) {
     // Silent fail safe
   }

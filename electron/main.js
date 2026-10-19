@@ -7,14 +7,7 @@ const { pathToFileURL } = require('url');
 // 1. Hide automation flags via native engine switch
 app.commandLine.appendSwitch('disable-blink-features', 'AutomationControlled');
 
-// 2. Disable WebAuthentication features that trigger Windows Security Passkey popups,
-// while preserving Site Isolation (do not disable site-per-process or IsolateOrigins)
-app.commandLine.appendSwitch(
-  'disable-features',
-  'WebAuthentication,WebAuthenticationConditionalUI,AdditionOfConfirmationToWebAuthn,OutOfProcessPdf'
-);
-
-// 3. Derive clean desktop User-Agent and sec-ch-ua dynamically from actual Chromium version (Chrome 132 in Electron 34)
+// 2. Derive clean desktop User-Agent and sec-ch-ua dynamically from actual Chromium version (Chrome 132 in Electron 34)
 const chromeVersion = process.versions.chrome || '132.0.0.0';
 const majorVersion = chromeVersion.split('.')[0] || '132';
 
@@ -76,19 +69,6 @@ function setupSession() {
   }
 
   app.on('web-contents-created', (_event, contents) => {
-    // Disable PublicKeyCredential on accounts.google.com to prevent Windows Security Bluetooth/Passkey dialogs
-    contents.on('did-start-navigation', (_navEvent, url) => {
-      if (url && url.includes('accounts.google.com')) {
-        contents.executeJavaScript(`
-          try {
-            if (typeof window !== 'undefined') {
-              window.PublicKeyCredential = undefined;
-            }
-          } catch(e) {}
-        `).catch(() => {});
-      }
-    });
-
     if (contents.getType() === 'webview') {
       contents.setWindowOpenHandler(({ url }) => {
         return {
