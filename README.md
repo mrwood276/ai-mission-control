@@ -12,6 +12,10 @@ A high-performance desktop command center built with **Electron + React (Vite) +
 - **Bottom Status & Quota Bar:** Status monitors for Claude Free Tier cooldowns, ChatGPT availability, Gemini prompt session loads (0/4), and session persistence.
 - **Persistent Partition:** Uses `partition="persist:clean_chrome_v3"` across all webviews to retain cookies and logins indefinitely.
 
+### ⚠️ Panduan & Catatan Keamanan Login
+- **Google Login di Embedded Browser:** Google dapat memblokir percobaan login langsung di browser embedded/webview kapan saja (*"This browser or app may not be secure"*). Jalur paling andal dan stabil adalah menggunakan tombol **🍪 Import Cookies** (ekspor cookies dari browser Google Chrome asli).
+- **Claude & ChatGPT:** Disarankan menggunakan login langsung dengan email / magic link, atau gunakan fitur Cookie Import jika akun Anda terhubung lewat Google SSO.
+
 ---
 
 ## 3 Workspace Modes

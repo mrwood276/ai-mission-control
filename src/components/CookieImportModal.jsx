@@ -169,6 +169,14 @@ export default function CookieImportModal({ isOpen, onClose, onReloadAll }) {
           </div>
         </div>
 
+        {/* Help Notice on Embedded Login Security */}
+        <div className="px-5 py-2.5 bg-amber-500/10 border-b border-amber-500/20 text-[11px] text-amber-300/90 flex items-center gap-2">
+          <ShieldAlert className="w-4 h-4 text-amber-400 flex-shrink-0" />
+          <span>
+            <b>Catatan Login:</b> Google dapat memblokir login di embedded browser kapan saja (&quot;This browser or app may not be secure&quot;). Jalur paling andal adalah <b>Cookie Import</b>, atau gunakan login Email/Magic Link untuk Claude dan ChatGPT.
+          </span>
+        </div>
+
         {/* Content Body */}
         <div className="p-5 flex-1 flex flex-col gap-3 overflow-hidden">
           <div className="flex items-center justify-between text-xs">
