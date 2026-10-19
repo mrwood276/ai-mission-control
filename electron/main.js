@@ -33,15 +33,6 @@ function setupSession() {
   targetSessions.forEach((ses) => {
     ses.setUserAgent(CLEAN_USER_AGENT);
 
-    // Register deep preload-stealth script on all WebContents belonging to this session
-    try {
-      if (typeof ses.setPreloads === 'function') {
-        ses.setPreloads([stealthPreloadPath]);
-      }
-    } catch (e) {
-      console.warn('Could not set preloads on session:', e.message);
-    }
-
     // Reject bluetooth, hid, and usb permissions to stop Windows Security Passkey prompts
     ses.setPermissionRequestHandler((_webContents, permission, callback) => {
       const blockedPermissions = ['bluetooth', 'hid', 'usb', 'u2f-devices'];
@@ -63,6 +54,19 @@ function setupSession() {
       callback({ cancel: false, requestHeaders: details.requestHeaders });
     });
   });
+
+  // ONLY register deep preload-stealth script on the webview partition session
+  // NEVER on defaultSession, because defaultSession is used by the main application window (which needs preload.js)
+  try {
+    const webviewSession = session.fromPartition(PARTITION_NAME);
+    if (typeof webviewSession.setPreloads === 'function') {
+      webviewSession.setPreloads([stealthPreloadPath]);
+    }
+    // Ensure defaultSession does not have stealthPreload overriding the mainWindow preload
+    session.defaultSession.setPreloads([]);
+  } catch (e) {
+    console.warn('Could not set preloads on webview partition session:', e.message);
+  }
 
   app.on('web-contents-created', (_event, contents) => {
     // Disable PublicKeyCredential on accounts.google.com to prevent Windows Security Bluetooth/Passkey dialogs

@@ -64,34 +64,44 @@ export default function CookieImportModal({ isOpen, onClose, onReloadAll }) {
     setStatus({ type: null, message: '' });
 
     try {
-      if (window.electronAPI && window.electronAPI.importCookies) {
-        const result = await window.electronAPI.importCookies(cookieJson.trim());
-        if (result.success) {
-          setStatus({
-            type: 'success',
-            message: `Berhasil menginjeksi ${result.count} cookies (${result.injected} total write across sessions)!`,
-            count: result.count,
-          });
+      if (!window.electronAPI) {
+        setStatus({
+          type: 'error',
+          message:
+            'Aplikasi saat ini dibuka di browser biasa (Chrome/Edge), bukan di jendela desktop Electron. Pastikan Anda membuka aplikasi lewat jendela desktop Electron ("npm run dev" atau "npm start").',
+        });
+        return;
+      }
 
-          // Reload all webviews so YouTube Studio / Gemini / Flow pick up login session immediately!
-          setTimeout(() => {
-            if (onReloadAll) onReloadAll();
-          }, 600);
+      if (typeof window.electronAPI.importCookies !== 'function') {
+        setStatus({
+          type: 'error',
+          message: 'Fungsi window.electronAPI.importCookies tidak ditemukan di preload script.',
+        });
+        return;
+      }
 
-          // Close modal after brief feedback
-          setTimeout(() => {
-            onClose();
-          }, 1800);
-        } else {
-          setStatus({
-            type: 'error',
-            message: result.error || 'Gagal mengimpor cookies.',
-          });
-        }
+      const result = await window.electronAPI.importCookies(cookieJson.trim());
+      if (result.success) {
+        setStatus({
+          type: 'success',
+          message: `Berhasil menginjeksi ${result.count} cookies (${result.injected} total write across sessions)!`,
+          count: result.count,
+        });
+
+        // Reload all webviews so YouTube Studio / Gemini / Flow pick up login session immediately!
+        setTimeout(() => {
+          if (onReloadAll) onReloadAll();
+        }, 600);
+
+        // Close modal after brief feedback
+        setTimeout(() => {
+          onClose();
+        }, 1800);
       } else {
         setStatus({
           type: 'error',
-          message: 'Electron API importCookies tidak terdeteksi.',
+          message: result.error || 'Gagal mengimpor cookies.',
         });
       }
     } catch (err) {
