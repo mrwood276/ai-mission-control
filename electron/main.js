@@ -180,35 +180,74 @@ function createWindow() {
   // Injects exported Chrome cookies directly into the Electron session jar
   ipcMain.handle('import-cookies', async (_event, cookiesJson) => {
     try {
+      if (typeof cookiesJson === 'string') {
+        if (cookiesJson.length > 5 * 1024 * 1024) {
+          return { success: false, error: 'Ukuran JSON cookie terlalu besar (maks 5MB).' };
+        }
+      }
+
       let cookies = [];
       if (typeof cookiesJson === 'string') {
-        cookies = JSON.parse(cookiesJson);
+        try {
+          cookies = JSON.parse(cookiesJson);
+        } catch (e) {
+          return { success: false, error: 'Format JSON tidak valid: ' + e.message };
+        }
       } else if (Array.isArray(cookiesJson)) {
         cookies = cookiesJson;
       }
 
       if (!Array.isArray(cookies) || cookies.length === 0) {
-        return { success: false, error: 'Format JSON cookie tidak valid atau kosong.' };
+        return { success: false, error: 'Format JSON cookie tidak valid atau kosong (harus berupa array).' };
       }
 
-      const sessionsToInject = [
-        session.fromPartition(PARTITION_NAME),
-        session.fromPartition('persist:clean_chrome_v2'),
-        session.defaultSession,
-      ];
-
-      let totalSuccess = 0;
-      let totalFailed = 0;
+      const ses = session.fromPartition(PARTITION_NAME);
+      const defaultExpirationDate = Math.floor(Date.now() / 1000) + (180 * 24 * 3600); // 180 days default
+      const failedCookies = [];
+      let injectedCount = 0;
 
       for (const cookie of cookies) {
-        if (!cookie.name || cookie.value === undefined) continue;
+        if (!cookie || typeof cookie !== 'object') {
+          failedCookies.push({ name: 'unknown', reason: 'Objek cookie tidak valid' });
+          continue;
+        }
 
-        const rawDomain = (cookie.domain || '').trim();
+        const name = typeof cookie.name === 'string' ? cookie.name.trim() : '';
+        if (!name) {
+          failedCookies.push({ name: 'empty', reason: 'Nama cookie kosong atau bukan string' });
+          continue;
+        }
+
+        let value = '';
+        if (typeof cookie.value === 'string') {
+          value = cookie.value;
+        } else if (cookie.value !== undefined && cookie.value !== null) {
+          value = String(cookie.value);
+        }
+
+        const rawDomain = typeof cookie.domain === 'string' ? cookie.domain.trim() : '';
         const cleanDomain = rawDomain.replace(/^\./, '');
-        const isSecure = Boolean(cookie.secure);
-        const protocol = isSecure ? 'https' : 'http';
-        const cookiePath = cookie.path || '/';
-        const url = `${protocol}://${cleanDomain || 'google.com'}${cookiePath}`;
+        const isGoogleOrYoutube = /(^|\.)(google\.[a-z.]+|youtube\.com)$/i.test(cleanDomain) || cleanDomain.includes('google') || cleanDomain.includes('youtube');
+
+        let isSecure = Boolean(cookie.secure);
+        if (name.startsWith('__Secure-') || name.startsWith('__Host-')) {
+          isSecure = true;
+        }
+
+        let protocol = 'https';
+        if (!isSecure && !isGoogleOrYoutube) {
+          protocol = 'http';
+        } else {
+          isSecure = true;
+        }
+
+        let cookiePath = typeof cookie.path === 'string' && cookie.path.startsWith('/') ? cookie.path : '/';
+        if (name.startsWith('__Host-')) {
+          cookiePath = '/';
+        }
+
+        const urlDomain = cleanDomain || 'google.com';
+        const url = `${protocol}://${urlDomain}${cookiePath}`;
 
         let sameSite = 'unspecified';
         if (cookie.sameSite) {
@@ -220,45 +259,58 @@ function createWindow() {
 
         const cookieDetails = {
           url,
-          name: cookie.name,
-          value: String(cookie.value),
+          name,
+          value,
           path: cookiePath,
           secure: isSecure,
           httpOnly: Boolean(cookie.httpOnly),
           sameSite,
         };
 
-        if (rawDomain) {
+        const isHostOnly = Boolean(cookie.hostOnly) || name.startsWith('__Host-');
+        if (!isHostOnly && rawDomain) {
           cookieDetails.domain = rawDomain;
         }
 
         const expiry = cookie.expirationDate || cookie.expiry;
-        if (expiry && typeof expiry === 'number') {
+        if (expiry && typeof expiry === 'number' && !isNaN(expiry) && expiry > 0) {
           cookieDetails.expirationDate = Math.floor(expiry);
+        } else {
+          cookieDetails.expirationDate = defaultExpirationDate;
         }
 
-        for (const targetSes of sessionsToInject) {
-          try {
-            await targetSes.cookies.set(cookieDetails);
-            totalSuccess++;
-          } catch (firstErr) {
+        try {
+          await ses.cookies.set(cookieDetails);
+          injectedCount++;
+        } catch (firstErr) {
+          if (cookieDetails.domain) {
             try {
               const fallbackDetails = { ...cookieDetails };
               delete fallbackDetails.domain;
-              await targetSes.cookies.set(fallbackDetails);
-              totalSuccess++;
+              await ses.cookies.set(fallbackDetails);
+              injectedCount++;
+              continue;
             } catch (secondErr) {
-              totalFailed++;
+              failedCookies.push({ name, reason: secondErr.message || firstErr.message });
+              continue;
             }
           }
+          failedCookies.push({ name, reason: firstErr.message });
         }
+      }
+
+      try {
+        await ses.cookies.flushStore();
+      } catch (flushErr) {
+        console.warn('[Session] cookies.flushStore error:', flushErr);
       }
 
       return {
         success: true,
         count: cookies.length,
-        injected: totalSuccess,
-        failed: totalFailed,
+        injected: injectedCount,
+        failed: failedCookies.length,
+        failedCookies,
       };
     } catch (err) {
       console.error('Failed to import cookies:', err);
