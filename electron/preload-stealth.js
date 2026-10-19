@@ -1,7 +1,10 @@
 // Preload stealth script: Executes before any web page scripts run
 const { contextBridge } = require('electron');
 
-function applyStealthPatches() {
+function applyStealthPatches(config = {}) {
+  const chromeFullVersion = config.chromeFullVersion || '132.0.0.0';
+  const chromeMajorVersion = config.chromeMajorVersion || '132';
+
   try {
     // 1. Delete navigator.webdriver or undefine it
     try {
@@ -65,8 +68,8 @@ function applyStealthPatches() {
     if (typeof navigator !== 'undefined') {
       const brands = [
         { brand: 'Not_A Brand', version: '24' },
-        { brand: 'Chromium', version: '131' },
-        { brand: 'Google Chrome', version: '131' },
+        { brand: 'Chromium', version: chromeMajorVersion },
+        { brand: 'Google Chrome', version: chromeMajorVersion },
       ];
 
       const highEntropyValues = {
@@ -75,14 +78,14 @@ function applyStealthPatches() {
         brands: brands,
         fullVersionList: [
           { brand: 'Not_A Brand', version: '24.0.0.0' },
-          { brand: 'Chromium', version: '131.0.6778.205' },
-          { brand: 'Google Chrome', version: '131.0.6778.205' },
+          { brand: 'Chromium', version: chromeFullVersion },
+          { brand: 'Google Chrome', version: chromeFullVersion },
         ],
         mobile: false,
         model: '',
         platform: 'Windows',
         platformVersion: '15.0.0',
-        uaFullVersion: '131.0.6778.205',
+        uaFullVersion: chromeFullVersion,
       };
 
       const userAgentDataMock = {
@@ -118,15 +121,19 @@ function applyStealthPatches() {
   }
 }
 
+const chromeFullVersion = (typeof process !== 'undefined' && process.versions && process.versions.chrome) || '132.0.0.0';
+const chromeMajorVersion = chromeFullVersion.split('.')[0] || '132';
+const versionConfig = { chromeFullVersion, chromeMajorVersion };
+
 try {
   if (contextBridge && typeof contextBridge.executeInMainWorld === 'function') {
     contextBridge.executeInMainWorld({
       func: applyStealthPatches,
-      args: [],
+      args: [versionConfig],
     });
   } else {
-    applyStealthPatches();
+    applyStealthPatches(versionConfig);
   }
 } catch (outerError) {
-  applyStealthPatches();
+  applyStealthPatches(versionConfig);
 }
