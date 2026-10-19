@@ -22,7 +22,8 @@ import {
   Folder, 
   AlertTriangle,
   ChevronDown,
-  Save
+  Search,
+  Loader2
 } from 'lucide-react';
 import { MODES, WEBVIEWS } from '../constants';
 import { injectTextToWebview, injectFreshGemini, DELIVERY_STATUS } from '../utils/webviewInjection';
@@ -78,6 +79,9 @@ export default function PipelineSidebar({
   const [toastMessage, setToastMessage] = useState(null);
   const [editingCardId, setEditingCardId] = useState(null);
   const [filterDone, setFilterDone] = useState('all'); // 'all', 'pending', 'completed'
+  const [searchQuery, setSearchQuery] = useState('');
+  const [deliveringAction, setDeliveringAction] = useState(null); // { sceneId, target }
+  const [sceneToDelete, setSceneToDelete] = useState(null);
 
   // Project management modals
   const [isProjectDropdownOpen, setIsProjectDropdownOpen] = useState(false);
@@ -180,7 +184,6 @@ export default function PipelineSidebar({
   const handleConfirmDelete = () => {
     if (!projectToDelete) return;
     if (projects.length <= 1) {
-      // If deleting the only project, reset to a fresh default project
       const fresh = createNewProject('Default Project');
       setProjects([fresh]);
       setActiveProjectId(fresh.id);
@@ -243,10 +246,9 @@ export default function PipelineSidebar({
       setActiveProjectId(importPreview.id);
       showToast(`✓ Imported "${importPreview.name}" as new project.`, 'success');
     } else {
-      // Replace active project
       updateActiveProject(() => ({
         ...importPreview,
-        id: activeProject.id, // maintain current ID
+        id: activeProject.id,
       }));
       showToast(`✓ Replaced active project with "${importPreview.name}".`, 'success');
     }
@@ -317,8 +319,11 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
     }
   };
 
-  // Webview Action Handlers with explicit delivery tracking
+  // Webview Action Handlers with double-click guard and explicit delivery tracking
   const handleSendToGemini = async (scene) => {
+    if (deliveringAction) return; // Prevent double clicks
+    setDeliveringAction({ sceneId: scene.id, target: 'gemini' });
+
     try {
       const res = await injectTextToWebview(WEBVIEWS.GEMINI.id, scene.prompt);
 
@@ -340,10 +345,15 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
       }
     } catch {
       showToast('Failed to deliver prompt to Gemini.', 'error');
+    } finally {
+      setDeliveringAction(null);
     }
   };
 
   const handleFreshGeminiGlobal = async (scene) => {
+    if (deliveringAction) return;
+    setDeliveringAction({ sceneId: scene.id, target: 'gemini-fresh' });
+
     try {
       const rules = activeProject.globalRules?.trim();
       const fullPrompt = rules ? `${rules}\n\n${scene.prompt.trim()}` : scene.prompt.trim();
@@ -362,10 +372,15 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
       }
     } catch {
       showToast('Failed to open fresh Gemini chat.', 'error');
+    } finally {
+      setDeliveringAction(null);
     }
   };
 
   const handleSendToFlow = async (scene) => {
+    if (deliveringAction) return;
+    setDeliveringAction({ sceneId: scene.id, target: 'flow' });
+
     try {
       const rules = activeProject.globalRules?.trim();
       const flowPrompt = rules ? `${rules}\n\n${scene.prompt.trim()}` : scene.prompt.trim();
@@ -381,6 +396,8 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
       }
     } catch {
       showToast('Failed to deliver prompt to Google Flow.', 'error');
+    } finally {
+      setDeliveringAction(null);
     }
   };
 
@@ -410,12 +427,14 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
     showToast(`Scene ${nextNumber} added.`, 'info');
   };
 
-  const handleDeleteScene = (id) => {
+  const handleConfirmDeleteScene = () => {
+    if (!sceneToDelete) return;
     updateActiveProject((p) => ({
       ...p,
-      scenes: p.scenes.filter((s) => s.id !== id),
+      scenes: p.scenes.filter((s) => s.id !== sceneToDelete.id),
     }));
-    showToast('Scene Card deleted.', 'info');
+    showToast(`Scene ${sceneToDelete.sceneNumber} deleted.`, 'info');
+    setSceneToDelete(null);
   };
 
   const handleUpdateScene = (id, field, value) => {
@@ -434,8 +453,15 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
 
   const scenes = activeProject.scenes || [];
   const filteredScenes = scenes.filter((scene) => {
-    if (filterDone === 'pending') return !scene.done;
-    if (filterDone === 'completed') return scene.done;
+    if (filterDone === 'pending' && scene.done) return false;
+    if (filterDone === 'completed' && !scene.done) return false;
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      const matchTitle = (scene.title || '').toLowerCase().includes(q);
+      const matchPrompt = (scene.prompt || '').toLowerCase().includes(q);
+      const matchNum = String(scene.sceneNumber || '').includes(q);
+      return matchTitle || matchPrompt || matchNum;
+    }
     return true;
   });
 
@@ -471,7 +497,11 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
             }`}
           >
             <span className="truncate flex-1 font-sans">{toastMessage.message}</span>
-            <button onClick={() => setToastMessage(null)} className="text-slate-400 hover:text-white">
+            <button
+              onClick={() => setToastMessage(null)}
+              aria-label="Dismiss notification"
+              className="text-slate-400 hover:text-white"
+            >
               <X className="w-3 h-3" />
             </button>
           </div>
@@ -482,7 +512,8 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
       <div className="h-8 bg-slate-900 border-b border-slate-800 px-2 flex items-center justify-between text-xs select-none flex-shrink-0">
         <button
           onClick={() => setCollapsed(!collapsed)}
-          className="flex items-center gap-1.5 text-slate-300 hover:text-white font-medium truncate"
+          aria-label={collapsed ? 'Expand Pipeline Sidebar' : 'Collapse Sidebar'}
+          className="flex items-center gap-1.5 text-slate-300 hover:text-white font-medium truncate focus-visible:ring-1 focus-visible:ring-purple-400 focus:outline-none rounded"
           title={collapsed ? 'Expand Pipeline Sidebar' : 'Collapse Sidebar'}
         >
           <Layers className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
@@ -531,7 +562,8 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
                     if (setGeminiCounter) setGeminiCounter(0);
                     showToast('Gemini session prompt counter reset to 0/4', 'info');
                   }}
-                  className="ml-0.5 p-0.5 rounded hover:bg-white/20 text-slate-400 hover:text-white transition"
+                  aria-label="Reset Gemini prompt counter"
+                  className="ml-0.5 p-0.5 rounded hover:bg-white/20 text-slate-400 hover:text-white transition focus-visible:ring-1 focus-visible:ring-sky-400 focus:outline-none"
                   title="Reset Gemini session prompt tracker to 0"
                 >
                   <RotateCcw className="w-2.5 h-2.5" />
@@ -544,7 +576,8 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
                   setParsedPreview(null);
                   setIsParserOpen(true);
                 }}
-                className="p-1 rounded bg-purple-600/30 hover:bg-purple-600 text-purple-300 hover:text-white border border-purple-500/40 transition"
+                aria-label="Open AI Storyboard Parser"
+                className="p-1 rounded bg-purple-600/30 hover:bg-purple-600 text-purple-300 hover:text-white border border-purple-500/40 transition focus-visible:ring-1 focus-visible:ring-purple-400 focus:outline-none"
                 title="Paste raw ChatGPT output to parse into Scene Cards"
               >
                 <ClipboardPaste className="w-3.5 h-3.5" />
@@ -571,10 +604,11 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
                       if (e.key === 'Escape') setIsRenameOpen(false);
                     }}
                     autoFocus
-                    className="flex-1 bg-slate-900 border border-purple-500/60 rounded px-2 py-0.5 text-xs text-white focus:outline-none"
+                    className="flex-1 bg-slate-900 border border-purple-500/60 rounded px-2 py-0.5 text-xs text-white focus:outline-none focus:ring-1 focus:ring-purple-400"
                   />
                   <button
                     onClick={handleRenameSubmit}
+                    aria-label="Save project name"
                     className="p-1 rounded bg-emerald-600 text-white hover:bg-emerald-500"
                     title="Save name"
                   >
@@ -582,6 +616,7 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
                   </button>
                   <button
                     onClick={() => setIsRenameOpen(false)}
+                    aria-label="Cancel renaming"
                     className="p-1 rounded bg-slate-800 text-slate-400 hover:text-white"
                     title="Cancel"
                   >
@@ -592,7 +627,8 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
                 <div className="flex items-center gap-1">
                   <button
                     onClick={() => setIsProjectDropdownOpen(!isProjectDropdownOpen)}
-                    className="flex items-center justify-between gap-1.5 flex-1 min-w-0 px-2 py-1 rounded bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-slate-700 text-left transition"
+                    aria-label="Select Project"
+                    className="flex items-center justify-between gap-1.5 flex-1 min-w-0 px-2 py-1 rounded bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-slate-700 text-left transition focus-visible:ring-1 focus-visible:ring-purple-400 focus:outline-none"
                   >
                     <div className="flex items-center gap-1.5 truncate">
                       <Folder className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
@@ -606,7 +642,8 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
                       setRenameValue(activeProject.name);
                       setIsRenameOpen(true);
                     }}
-                    className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200"
+                    aria-label="Rename current project"
+                    className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 focus-visible:ring-1 focus-visible:ring-purple-400 focus:outline-none"
                     title="Rename current project"
                   >
                     <Edit3 className="w-3 h-3" />
@@ -643,6 +680,7 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
                                 setProjectToDelete(proj);
                                 setIsProjectDropdownOpen(false);
                               }}
+                              aria-label={`Delete project ${proj.name}`}
                               className="p-1 hover:text-rose-400 text-slate-500 rounded"
                               title="Delete project"
                             >
@@ -714,7 +752,7 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
               </p>
               <button
                 onClick={handleCopyStoryboardWrapper}
-                className="w-full py-1.5 px-2 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-medium text-[11px] flex items-center justify-center gap-1.5 transition shadow-sm"
+                className="w-full py-1.5 px-2 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-medium text-[11px] flex items-center justify-center gap-1.5 transition shadow-sm focus-visible:ring-2 focus-visible:ring-purple-400 focus:outline-none"
               >
                 <Copy className="w-3 h-3" />
                 <span>Copy Storyboard Wrapper</span>
@@ -740,46 +778,70 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
             />
           </div>
 
-          {/* Section 2: Scene Cards List Filter Bar */}
-          <div className="h-8 px-2.5 bg-slate-900/60 border-b border-slate-800 flex items-center justify-between flex-shrink-0 select-none">
-            <div className="flex items-center gap-1.5 font-medium text-slate-300 text-[11px]">
-              <FileText className="w-3 h-3 text-sky-400" />
-              <span>
-                Scene Cards ({completedCount}/{scenes.length})
-              </span>
-            </div>
-
-            <div className="flex items-center gap-1">
-              {/* Filter Completed / Pending */}
-              <div className="flex items-center bg-slate-950 rounded border border-slate-800 p-0.5 text-[10px]">
-                <button
-                  onClick={() => setFilterDone('all')}
-                  className={`px-1.5 py-0.5 rounded ${filterDone === 'all' ? 'bg-slate-800 text-white font-medium' : 'text-slate-400 hover:text-slate-200'}`}
-                >
-                  All
-                </button>
-                <button
-                  onClick={() => setFilterDone('pending')}
-                  className={`px-1.5 py-0.5 rounded ${filterDone === 'pending' ? 'bg-slate-800 text-white font-medium' : 'text-slate-400 hover:text-slate-200'}`}
-                >
-                  Todo
-                </button>
-                <button
-                  onClick={() => setFilterDone('completed')}
-                  className={`px-1.5 py-0.5 rounded ${filterDone === 'completed' ? 'bg-slate-800 text-white font-medium' : 'text-slate-400 hover:text-slate-200'}`}
-                >
-                  Done
-                </button>
+          {/* Section 2: Scene Cards List Filter & Search Bar */}
+          <div className="p-2 bg-slate-900/60 border-b border-slate-800 flex flex-col gap-1.5 flex-shrink-0 select-none">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 font-medium text-slate-300 text-[11px]">
+                <FileText className="w-3 h-3 text-sky-400" />
+                <span>
+                  Scenes ({completedCount}/{scenes.length})
+                </span>
               </div>
 
-              {/* Add New Scene Button */}
-              <button
-                onClick={handleAddScene}
-                className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition"
-                title="Add a new blank Scene Card"
-              >
-                <Plus className="w-3 h-3" />
-              </button>
+              <div className="flex items-center gap-1">
+                {/* Filter Completed / Pending */}
+                <div className="flex items-center bg-slate-950 rounded border border-slate-800 p-0.5 text-[10px]">
+                  <button
+                    onClick={() => setFilterDone('all')}
+                    className={`px-1.5 py-0.5 rounded ${filterDone === 'all' ? 'bg-slate-800 text-white font-medium' : 'text-slate-400 hover:text-slate-200'}`}
+                  >
+                    All
+                  </button>
+                  <button
+                    onClick={() => setFilterDone('pending')}
+                    className={`px-1.5 py-0.5 rounded ${filterDone === 'pending' ? 'bg-slate-800 text-white font-medium' : 'text-slate-400 hover:text-slate-200'}`}
+                  >
+                    Todo
+                  </button>
+                  <button
+                    onClick={() => setFilterDone('completed')}
+                    className={`px-1.5 py-0.5 rounded ${filterDone === 'completed' ? 'bg-slate-800 text-white font-medium' : 'text-slate-400 hover:text-slate-200'}`}
+                  >
+                    Done
+                  </button>
+                </div>
+
+                {/* Add New Scene Button */}
+                <button
+                  onClick={handleAddScene}
+                  aria-label="Add new scene card"
+                  className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition focus-visible:ring-1 focus-visible:ring-purple-400 focus:outline-none"
+                  title="Add a new blank Scene Card"
+                >
+                  <Plus className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+
+            {/* Quick Search Input */}
+            <div className="relative flex items-center">
+              <Search className="w-3 h-3 text-slate-500 absolute left-2 pointer-events-none" />
+              <input
+                type="text"
+                placeholder="Search scenes by title, number, prompt..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-6 pr-6 py-1 text-[11px] text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500/60"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  aria-label="Clear search"
+                  className="absolute right-1.5 p-0.5 text-slate-500 hover:text-slate-300"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
             </div>
           </div>
 
@@ -788,21 +850,37 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
             {filteredScenes.length === 0 ? (
               <div className="p-6 text-center text-slate-500 text-xs flex flex-col items-center gap-2">
                 <FileText className="w-6 h-6 text-slate-600" />
-                <span>No scene cards found matching filter.</span>
-                <button
-                  onClick={() => {
-                    setParsedPreview(null);
-                    setIsParserOpen(true);
-                  }}
-                  className="mt-1 px-3 py-1 rounded bg-purple-600/30 hover:bg-purple-600/50 text-purple-300 text-[11px] transition"
-                >
-                  Parse Storyboard
-                </button>
+                <span>
+                  {searchQuery.trim()
+                    ? `No scenes match "${searchQuery}".`
+                    : scenes.length === 0
+                    ? 'No scenes in this project yet.'
+                    : 'No scenes match filter.'}
+                </span>
+                {searchQuery.trim() ? (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="mt-1 px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] transition"
+                  >
+                    Clear Search
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => {
+                      setParsedPreview(null);
+                      setIsParserOpen(true);
+                    }}
+                    className="mt-1 px-3 py-1 rounded bg-purple-600/30 hover:bg-purple-600/50 text-purple-300 text-[11px] transition"
+                  >
+                    Parse Storyboard
+                  </button>
+                )}
               </div>
             ) : (
               filteredScenes.map((scene) => {
                 const isEditing = editingCardId === scene.id;
                 const isGeminiFull = (geminiCounter || 0) >= 4;
+                const isThisDelivering = deliveringAction?.sceneId === scene.id;
 
                 return (
                   <div
@@ -818,7 +896,8 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
                       <div className="flex items-center gap-1.5 flex-1 min-w-0">
                         <button
                           onClick={() => handleToggleDone(scene.id)}
-                          className={`flex-shrink-0 transition ${
+                          aria-label={scene.done ? `Mark scene ${scene.sceneNumber} as todo` : `Mark scene ${scene.sceneNumber} as done`}
+                          className={`flex-shrink-0 transition focus-visible:ring-1 focus-visible:ring-emerald-400 focus:outline-none rounded ${
                             scene.done
                               ? 'text-emerald-400 hover:text-emerald-300'
                               : 'text-slate-600 hover:text-slate-400'
@@ -835,7 +914,7 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
                             onChange={(e) =>
                               handleUpdateScene(scene.id, 'title', e.target.value)
                             }
-                            className="flex-1 bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-xs text-slate-200 font-semibold focus:outline-none"
+                            className="flex-1 bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-xs text-slate-200 font-semibold focus:outline-none focus:ring-1 focus:ring-purple-400"
                           />
                         ) : (
                           <span
@@ -856,7 +935,8 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
                           onClick={() =>
                             setEditingCardId(isEditing ? null : scene.id)
                           }
-                          className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition"
+                          aria-label={isEditing ? 'Save edits' : 'Edit scene card'}
+                          className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition focus-visible:ring-1 focus-visible:ring-purple-400 focus:outline-none"
                           title={isEditing ? 'Save Edit' : 'Edit Scene'}
                         >
                           {isEditing ? (
@@ -866,8 +946,9 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
                           )}
                         </button>
                         <button
-                          onClick={() => handleDeleteScene(scene.id)}
-                          className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-rose-400 transition"
+                          onClick={() => setSceneToDelete(scene)}
+                          aria-label={`Delete scene ${scene.sceneNumber}`}
+                          className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-rose-400 transition focus-visible:ring-1 focus-visible:ring-rose-400 focus:outline-none"
                           title="Delete Scene"
                         >
                           <Trash2 className="w-3 h-3" />
@@ -883,7 +964,7 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
                           handleUpdateScene(scene.id, 'prompt', e.target.value)
                         }
                         rows={3}
-                        className="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-slate-300 text-[11px] font-mono resize-none focus:outline-none"
+                        className="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-slate-300 text-[11px] font-mono resize-none focus:outline-none focus:ring-1 focus:ring-purple-400"
                       />
                     ) : (
                       <p className="text-[11px] text-slate-400 font-mono leading-relaxed line-clamp-3 select-text bg-slate-900/50 p-1.5 rounded border border-slate-900">
@@ -896,38 +977,60 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
                       {/* Button 1: Inject Scene Only to Gemini */}
                       <button
                         onClick={() => handleSendToGemini(scene)}
-                        className={`flex-1 py-1 px-1.5 rounded text-[10px] font-medium flex items-center justify-center gap-1 transition shadow-sm ${
-                          isGeminiFull
+                        disabled={isThisDelivering}
+                        aria-label={`Inject scene ${scene.sceneNumber} to Gemini`}
+                        className={`flex-1 py-1 px-1.5 rounded text-[10px] font-medium flex items-center justify-center gap-1 transition shadow-sm focus-visible:ring-1 focus-visible:ring-sky-400 focus:outline-none ${
+                          isThisDelivering && deliveringAction?.target === 'gemini'
+                            ? 'bg-slate-800 text-slate-400 cursor-wait'
+                            : isGeminiFull
                             ? 'bg-slate-800 hover:bg-slate-700 text-slate-400'
                             : 'bg-sky-600/80 hover:bg-sky-500 text-white'
                         }`}
                         title="Inject scene prompt into Gemini webview input"
                       >
-                        <ArrowRight className="w-2.5 h-2.5" />
+                        {isThisDelivering && deliveringAction?.target === 'gemini' ? (
+                          <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                        ) : (
+                          <ArrowRight className="w-2.5 h-2.5" />
+                        )}
                         <span>Inject Scene</span>
                       </button>
 
                       {/* Button 2: Fresh Gemini + Global + Scene */}
                       <button
                         onClick={() => handleFreshGeminiGlobal(scene)}
-                        className={`flex-1 py-1 px-1.5 rounded text-[10px] font-medium flex items-center justify-center gap-1 transition shadow-sm ${
-                          isGeminiFull
+                        disabled={isThisDelivering}
+                        aria-label={`Fresh session with Global Rules and scene ${scene.sceneNumber} to Gemini`}
+                        className={`flex-1 py-1 px-1.5 rounded text-[10px] font-medium flex items-center justify-center gap-1 transition shadow-sm focus-visible:ring-1 focus-visible:ring-amber-400 focus:outline-none ${
+                          isThisDelivering && deliveringAction?.target === 'gemini-fresh'
+                            ? 'bg-slate-800 text-slate-400 cursor-wait'
+                            : isGeminiFull
                             ? 'bg-amber-600 hover:bg-amber-500 text-white font-semibold animate-pulse ring-1 ring-amber-400'
                             : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
                         }`}
                         title="Open fresh Gemini chat, wait for load, and inject Global Rules + Scene Prompt together"
                       >
-                        <RefreshCw className="w-2.5 h-2.5 text-amber-300" />
+                        {isThisDelivering && deliveringAction?.target === 'gemini-fresh' ? (
+                          <Loader2 className="w-2.5 h-2.5 animate-spin text-amber-300" />
+                        ) : (
+                          <RefreshCw className="w-2.5 h-2.5 text-amber-300" />
+                        )}
                         <span>Fresh + Global</span>
                       </button>
 
                       {/* Button 3: Send to Google Flow */}
                       <button
                         onClick={() => handleSendToFlow(scene)}
-                        className="flex-1 py-1 px-1.5 rounded bg-purple-600/80 hover:bg-purple-500 text-white text-[10px] font-medium flex items-center justify-center gap-1 transition shadow-sm"
+                        disabled={isThisDelivering}
+                        aria-label={`Inject scene ${scene.sceneNumber} to Google Flow`}
+                        className="flex-1 py-1 px-1.5 rounded bg-purple-600/80 hover:bg-purple-500 text-white text-[10px] font-medium flex items-center justify-center gap-1 transition shadow-sm focus-visible:ring-1 focus-visible:ring-purple-400 focus:outline-none disabled:opacity-50"
                         title="Combine Global Rules + Scene Prompt and inject/copy to Google Flow"
                       >
-                        <Sparkles className="w-2.5 h-2.5" />
+                        {isThisDelivering && deliveringAction?.target === 'flow' ? (
+                          <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                        ) : (
+                          <Sparkles className="w-2.5 h-2.5" />
+                        )}
                         <span>🎬 Flow</span>
                       </button>
                     </div>
@@ -935,6 +1038,35 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
                 );
               })
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Delete Scene Confirmation Modal */}
+      {sceneToDelete && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-2xl space-y-3 text-xs">
+            <div className="flex items-center gap-2 text-rose-400 font-semibold text-sm">
+              <AlertTriangle className="w-4 h-4" />
+              <span>Delete Scene Card</span>
+            </div>
+            <p className="text-slate-300">
+              Are you sure you want to delete <span className="font-semibold text-white">"{sceneToDelete.title}"</span>?
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => setSceneToDelete(null)}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmDeleteScene}
+                className="px-4 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-medium"
+              >
+                Delete Scene
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -998,7 +1130,7 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
                 onClick={handleConfirmDelete}
                 className="px-4 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-medium"
               >
-                Delete
+                Delete Project
               </button>
             </div>
           </div>
@@ -1014,7 +1146,11 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
                 <Upload className="w-4 h-4 text-amber-400" />
                 <span>Import Project Preview</span>
               </h3>
-              <button onClick={() => setImportPreview(null)} className="text-slate-400 hover:text-white">
+              <button
+                onClick={() => setImportPreview(null)}
+                aria-label="Close import preview"
+                className="text-slate-400 hover:text-white"
+              >
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -1067,7 +1203,7 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
                   </h3>
                   <p className="text-[11px] text-slate-400">
                     {parsedPreview
-                      ? 'Review parsed scenes before confirming replacement of existing project.'
+                      ? 'Review parsed scenes before confirming replacement in the active project.'
                       : 'Paste raw ChatGPT storyboard to extract Global Rules and individual Scene Cards.'}
                   </p>
                 </div>
@@ -1077,6 +1213,7 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
                   setParsedPreview(null);
                   setIsParserOpen(false);
                 }}
+                aria-label="Close parser"
                 className="p-1 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition"
               >
                 <X className="w-4 h-4" />

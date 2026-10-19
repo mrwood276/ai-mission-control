@@ -203,13 +203,19 @@ export default function StatusBar({ geminiCounter = 0, setGeminiCounter, maxGemi
           {/* Claude Free Tier Monitor */}
           <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-slate-900/90 border border-slate-800 text-[11px]">
             <span className={`w-1.5 h-1.5 rounded-full ${isClaudeCooldownActive ? 'bg-rose-400 animate-ping' : 'bg-amber-400'}`}></span>
-            <span className="text-slate-300 font-medium">Claude Free:</span>
+            <span
+              className="text-slate-300 font-medium cursor-help"
+              title="Manual message clicker. Not an automated or server-verified rate limit."
+            >
+              Claude (Manual):
+            </span>
             
             {/* Msg Count & +1 button */}
             <span className="text-amber-400 font-semibold">{claudeCount} msg</span>
             <button
               onClick={handleIncrementClaude}
-              className="p-0.5 hover:bg-slate-800 text-slate-400 hover:text-amber-300 rounded transition"
+              aria-label="Add 1 message to Claude manual tracker"
+              className="p-0.5 hover:bg-slate-800 text-slate-400 hover:text-amber-300 rounded transition focus-visible:ring-1 focus-visible:ring-amber-400 focus:outline-none"
               title="Add 1 message"
             >
               <Plus className="w-2.5 h-2.5" />
@@ -217,7 +223,8 @@ export default function StatusBar({ geminiCounter = 0, setGeminiCounter, maxGemi
             {claudeCount > 0 && (
               <button
                 onClick={handleResetClaudeMsg}
-                className="p-0.5 hover:bg-slate-800 text-slate-500 hover:text-slate-300 rounded transition"
+                aria-label="Reset Claude manual message counter"
+                className="p-0.5 hover:bg-slate-800 text-slate-500 hover:text-slate-300 rounded transition focus-visible:ring-1 focus-visible:ring-amber-400 focus:outline-none"
                 title="Reset message counter"
               >
                 <RotateCcw className="w-2.5 h-2.5" />
@@ -228,13 +235,17 @@ export default function StatusBar({ geminiCounter = 0, setGeminiCounter, maxGemi
 
             {/* Cooldown Timer or Start Button */}
             {isClaudeCooldownActive ? (
-              <div className="flex items-center gap-1 text-rose-300 font-bold animate-pulse">
+              <div
+                className="flex items-center gap-1 text-rose-300 font-bold animate-pulse cursor-help"
+                title="Locally configured countdown reminder. Not an official server rate limit."
+              >
                 <Timer className="w-3 h-3 text-rose-400" />
-                <span>{formatRemaining(claudeCooldownEnd)}</span>
+                <span>{formatRemaining(claudeCooldownEnd)} (Local)</span>
                 <button
                   onClick={() => handleCancelTimer('claude')}
-                  className="p-0.5 hover:bg-rose-950/80 text-rose-400 rounded"
-                  title="Batalkan timer cooldown"
+                  aria-label="Cancel Claude local timer"
+                  className="p-0.5 hover:bg-rose-950/80 text-rose-400 rounded focus-visible:ring-1 focus-visible:ring-rose-400 focus:outline-none"
+                  title="Cancel local timer"
                 >
                   <X className="w-2.5 h-2.5" />
                 </button>
@@ -242,11 +253,12 @@ export default function StatusBar({ geminiCounter = 0, setGeminiCounter, maxGemi
             ) : (
               <button
                 onClick={() => setTimerModal({ isOpen: true, service: 'claude', hours: 3, minutes: 0 })}
-                className="flex items-center gap-1 text-slate-400 hover:text-amber-300 transition"
-                title="Set Cooldown Timer (3 Hours / Custom)"
+                aria-label="Start Claude local cooldown timer"
+                className="flex items-center gap-1 text-slate-400 hover:text-amber-300 transition focus-visible:ring-1 focus-visible:ring-amber-400 focus:outline-none"
+                title="Set Local Cooldown Reminder (Manual Timer)"
               >
                 <Clock className="w-3 h-3 text-slate-500" />
-                <span>Start Cooldown</span>
+                <span>Start Timer</span>
               </button>
             )}
           </div>
@@ -254,13 +266,19 @@ export default function StatusBar({ geminiCounter = 0, setGeminiCounter, maxGemi
           {/* ChatGPT Free Tier Monitor */}
           <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-slate-900/90 border border-slate-800 text-[11px]">
             <span className={`w-1.5 h-1.5 rounded-full ${isChatgptCooldownActive ? 'bg-rose-400 animate-ping' : 'bg-emerald-400'}`}></span>
-            <span className="text-slate-300 font-medium">ChatGPT Free:</span>
+            <span
+              className="text-slate-300 font-medium cursor-help"
+              title="Manual message clicker. Not an automated or server-verified rate limit."
+            >
+              ChatGPT (Manual):
+            </span>
             
             {/* Msg Count & +1 button */}
             <span className="text-emerald-400 font-semibold">{chatgptCount} msg</span>
             <button
               onClick={handleIncrementChatgpt}
-              className="p-0.5 hover:bg-slate-800 text-slate-400 hover:text-emerald-300 rounded transition"
+              aria-label="Add 1 message to ChatGPT manual tracker"
+              className="p-0.5 hover:bg-slate-800 text-slate-400 hover:text-emerald-300 rounded transition focus-visible:ring-1 focus-visible:ring-emerald-400 focus:outline-none"
               title="Add 1 message"
             >
               <Plus className="w-2.5 h-2.5" />
@@ -268,7 +286,8 @@ export default function StatusBar({ geminiCounter = 0, setGeminiCounter, maxGemi
             {chatgptCount > 0 && (
               <button
                 onClick={handleResetChatgptMsg}
-                className="p-0.5 hover:bg-slate-800 text-slate-500 hover:text-slate-300 rounded transition"
+                aria-label="Reset ChatGPT manual message counter"
+                className="p-0.5 hover:bg-slate-800 text-slate-500 hover:text-slate-300 rounded transition focus-visible:ring-1 focus-visible:ring-emerald-400 focus:outline-none"
                 title="Reset message counter"
               >
                 <RotateCcw className="w-2.5 h-2.5" />
@@ -279,13 +298,17 @@ export default function StatusBar({ geminiCounter = 0, setGeminiCounter, maxGemi
 
             {/* Cooldown Timer or Start Button */}
             {isChatgptCooldownActive ? (
-              <div className="flex items-center gap-1 text-rose-300 font-bold animate-pulse">
+              <div
+                className="flex items-center gap-1 text-rose-300 font-bold animate-pulse cursor-help"
+                title="Locally configured countdown reminder. Not an official server rate limit."
+              >
                 <Timer className="w-3 h-3 text-rose-400" />
-                <span>{formatRemaining(chatgptCooldownEnd)}</span>
+                <span>{formatRemaining(chatgptCooldownEnd)} (Local)</span>
                 <button
                   onClick={() => handleCancelTimer('chatgpt')}
-                  className="p-0.5 hover:bg-rose-950/80 text-rose-400 rounded"
-                  title="Batalkan timer cooldown"
+                  aria-label="Cancel ChatGPT local timer"
+                  className="p-0.5 hover:bg-rose-950/80 text-rose-400 rounded focus-visible:ring-1 focus-visible:ring-rose-400 focus:outline-none"
+                  title="Cancel local timer"
                 >
                   <X className="w-2.5 h-2.5" />
                 </button>
@@ -293,11 +316,12 @@ export default function StatusBar({ geminiCounter = 0, setGeminiCounter, maxGemi
             ) : (
               <button
                 onClick={() => setTimerModal({ isOpen: true, service: 'chatgpt', hours: 3, minutes: 0 })}
-                className="flex items-center gap-1 text-slate-400 hover:text-emerald-300 transition"
-                title="Set Cooldown Timer (3 Hours / Custom)"
+                aria-label="Start ChatGPT local cooldown timer"
+                className="flex items-center gap-1 text-slate-400 hover:text-emerald-300 transition focus-visible:ring-1 focus-visible:ring-emerald-400 focus:outline-none"
+                title="Set Local Cooldown Reminder (Manual Timer)"
               >
                 <Clock className="w-3 h-3 text-slate-500" />
-                <span>Start Cooldown</span>
+                <span>Start Timer</span>
               </button>
             )}
           </div>
@@ -317,7 +341,8 @@ export default function StatusBar({ geminiCounter = 0, setGeminiCounter, maxGemi
             {geminiCounter > 0 && setGeminiCounter && (
               <button
                 onClick={() => setGeminiCounter(0)}
-                className="p-0.5 hover:bg-slate-800 text-slate-500 hover:text-slate-300 rounded transition"
+                aria-label="Reset Gemini session prompt tracker to 0"
+                className="p-0.5 hover:bg-slate-800 text-slate-500 hover:text-slate-300 rounded transition focus-visible:ring-1 focus-visible:ring-sky-400 focus:outline-none"
                 title="Reset local session prompt tracker to 0"
               >
                 <RotateCcw className="w-2.5 h-2.5" />

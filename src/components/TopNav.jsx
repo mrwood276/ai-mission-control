@@ -74,7 +74,11 @@ export default function TopNav({ activeMode, setActiveMode, onReloadActive, onRe
         </div>
 
         {/* Mode Navigation Tabs */}
-        <nav className="flex items-center gap-1 bg-slate-900/90 p-1 rounded-xl border border-slate-800/80 shadow-inner">
+        <nav
+          role="tablist"
+          aria-label="Workspace Modes"
+          className="flex items-center gap-1 bg-slate-900/90 p-1 rounded-xl border border-slate-800/80 shadow-inner"
+        >
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeMode === item.id;
@@ -82,8 +86,11 @@ export default function TopNav({ activeMode, setActiveMode, onReloadActive, onRe
             return (
               <button
                 key={item.id}
+                role="tab"
+                aria-selected={isActive}
+                aria-label={`Switch to mode ${item.number}: ${item.title}`}
                 onClick={() => setActiveMode(item.id)}
-                className={`group relative flex items-center gap-3 px-4 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 ${
+                className={`group relative flex items-center gap-3 px-4 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 focus-visible:ring-2 focus-visible:ring-sky-400 focus:outline-none ${
                   isActive
                     ? `bg-slate-800/95 text-white shadow-md border border-slate-700/60`
                     : `text-slate-400 hover:text-slate-200 hover:bg-slate-800/40`
@@ -124,7 +131,8 @@ export default function TopNav({ activeMode, setActiveMode, onReloadActive, onRe
           {/* Sign-In & Authentication Guidance */}
           <button
             onClick={() => setIsAuthHelpOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold shadow-md transition-all bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 hover:border-slate-600 active:scale-95"
+            aria-label="View sign-in and authentication guidance"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold shadow-md transition-all bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 hover:border-slate-600 active:scale-95 focus-visible:ring-2 focus-visible:ring-sky-400 focus:outline-none"
             title="View supported sign-in flows and external browser alternatives"
           >
             <Info className="w-3.5 h-3.5 text-sky-400" />
@@ -143,7 +151,8 @@ export default function TopNav({ activeMode, setActiveMode, onReloadActive, onRe
           {/* Global Reload Helper */}
           <button
             onClick={onReloadActive}
-            className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 hover:border-slate-700 transition"
+            aria-label="Reload active webviews"
+            className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 hover:border-slate-700 transition focus-visible:ring-2 focus-visible:ring-sky-400 focus:outline-none"
             title="Reload active webviews"
           >
             <RotateCw className="w-4 h-4" />

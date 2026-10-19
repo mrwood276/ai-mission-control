@@ -5,7 +5,9 @@ import {
   ArrowRight, 
   ExternalLink, 
   Loader2,
-  Globe
+  Globe,
+  AlertTriangle,
+  RefreshCw
 } from 'lucide-react';
 import { SESSION_PARTITION } from '../constants';
 
@@ -20,6 +22,7 @@ export default function WebviewWrapper({
 }) {
   const webviewRef = useRef(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState(null);
   const [currentUrl, setCurrentUrl] = useState(url);
   const [canGoBack, setCanGoBack] = useState(false);
   const [canGoForward, setCanGoForward] = useState(false);
@@ -28,21 +31,28 @@ export default function WebviewWrapper({
     const webview = webviewRef.current;
     if (!webview) return;
 
-    const handleStartLoading = () => setIsLoading(true);
+    const handleStartLoading = () => {
+      setIsLoading(true);
+      setLoadError(null);
+    };
+
     const handleStopLoading = () => {
       setIsLoading(false);
       try {
         setCanGoBack(webview.canGoBack ? webview.canGoBack() : false);
         setCanGoForward(webview.canGoForward ? webview.canGoForward() : false);
         setCurrentUrl(webview.getURL ? webview.getURL() : url);
-      } catch (e) {
+      } catch {
         // Safe fallback
       }
     };
 
     const handleFailLoad = (event) => {
       setIsLoading(false);
-      console.warn(`[Webview ${name}] Failed to load:`, event);
+      // Ignore normal navigation redirect aborts (code -3)
+      if (event.errorCode !== -3 && event.isMainFrame) {
+        setLoadError(event.errorDescription || `Error ${event.errorCode}`);
+      }
     };
 
     webview.addEventListener('did-start-loading', handleStartLoading);
@@ -57,7 +67,8 @@ export default function WebviewWrapper({
   }, [name, url]);
 
   const handleReload = () => {
-    if (webviewRef.current && webviewRef.current.reload) {
+    setLoadError(null);
+    if (webviewRef.current && typeof webviewRef.current.reload === 'function') {
       webviewRef.current.reload();
     }
   };
@@ -108,13 +119,14 @@ export default function WebviewWrapper({
         {/* Browser Navigation & Control Buttons */}
         <div className="flex items-center gap-1">
           {isLoading && (
-            <Loader2 className="w-3.5 h-3.5 text-sky-400 animate-spin mr-1" />
+            <Loader2 className="w-3.5 h-3.5 text-sky-400 animate-spin mr-1" aria-label="Loading page" />
           )}
 
           <button
             onClick={handleBack}
             disabled={!canGoBack}
-            className={`p-1 rounded hover:bg-slate-800 text-slate-400 transition ${!canGoBack ? 'opacity-30 cursor-not-allowed' : 'hover:text-slate-200'}`}
+            aria-label={`Go back in ${name}`}
+            className={`p-1 rounded hover:bg-slate-800 text-slate-400 transition focus-visible:ring-1 focus-visible:ring-sky-400 focus:outline-none ${!canGoBack ? 'opacity-30 cursor-not-allowed' : 'hover:text-slate-200'}`}
             title="Go Back"
           >
             <ArrowLeft className="w-3 h-3" />
@@ -123,7 +135,8 @@ export default function WebviewWrapper({
           <button
             onClick={handleForward}
             disabled={!canGoForward}
-            className={`p-1 rounded hover:bg-slate-800 text-slate-400 transition ${!canGoForward ? 'opacity-30 cursor-not-allowed' : 'hover:text-slate-200'}`}
+            aria-label={`Go forward in ${name}`}
+            className={`p-1 rounded hover:bg-slate-800 text-slate-400 transition focus-visible:ring-1 focus-visible:ring-sky-400 focus:outline-none ${!canGoForward ? 'opacity-30 cursor-not-allowed' : 'hover:text-slate-200'}`}
             title="Go Forward"
           >
             <ArrowRight className="w-3 h-3" />
@@ -131,7 +144,8 @@ export default function WebviewWrapper({
 
           <button
             onClick={handleReload}
-            className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition"
+            aria-label={`Reload ${name}`}
+            className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition focus-visible:ring-1 focus-visible:ring-sky-400 focus:outline-none"
             title="Reload Webview"
           >
             <RotateCw className={`w-3 h-3 ${isLoading ? 'animate-spin text-sky-400' : ''}`} />
@@ -139,7 +153,8 @@ export default function WebviewWrapper({
 
           <button
             onClick={handleOpenExternal}
-            className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition"
+            aria-label={`Open ${name} in external browser`}
+            className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition focus-visible:ring-1 focus-visible:ring-sky-400 focus:outline-none"
             title="Open in System Browser"
           >
             <ExternalLink className="w-3 h-3" />
@@ -157,6 +172,37 @@ export default function WebviewWrapper({
           allowpopups="true"
           style={{ width: '100%', height: '100%', display: 'flex' }}
         />
+
+        {/* Failed Navigation / Offline Overlay */}
+        {loadError && (
+          <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center z-20">
+            <div className="w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center mb-3">
+              <AlertTriangle className="w-5 h-5" />
+            </div>
+            <h4 className="font-semibold text-sm text-slate-200 mb-1">
+              Failed to load {name}
+            </h4>
+            <p className="text-xs text-slate-400 max-w-sm mb-4 font-mono leading-relaxed">
+              {loadError}
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleReload}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 transition"
+              >
+                <RefreshCw className="w-3.5 h-3.5 text-sky-400" />
+                <span>Retry</span>
+              </button>
+              <button
+                onClick={handleOpenExternal}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-medium transition"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                <span>Open in Browser</span>
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
