@@ -2,6 +2,8 @@ const { app, BrowserWindow, session, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
+const { pathToFileURL } = require('url');
+
 // 1. Hide automation flags via native engine switch
 app.commandLine.appendSwitch('disable-blink-features', 'AutomationControlled');
 
@@ -21,6 +23,11 @@ const CLEAN_USER_AGENT =
 
 const PARTITION_NAME = 'persist:clean_chrome_v3';
 const stealthPreloadPath = path.join(__dirname, 'preload-stealth.js');
+const stealthPreloadUrl = pathToFileURL(stealthPreloadPath).href;
+
+ipcMain.on('get-stealth-preload-url', (event) => {
+  event.returnValue = stealthPreloadUrl;
+});
 
 app.userAgentFallback = CLEAN_USER_AGENT;
 
