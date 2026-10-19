@@ -32,6 +32,13 @@ export const DEFAULT_SCENES = [
     title: 'Scene 1: Opening Hook',
     prompt:
       'Cinematic wide shot of cybernetic command center with holographic screens glowing in neon blue and amber, cinematic depth of field.',
+    videoPrompt:
+      'Cinematic wide shot of cybernetic command center with holographic screens glowing in neon blue and amber, cinematic depth of field.',
+    imagePrompt:
+      'Static wide establishing shot of a futuristic cybernetic command center, glowing holographic displays in neon blue and amber, sleek metallic consoles, dramatic volumetric rim lighting, photorealistic octane render, 8k.',
+    imageAsset: null,
+    imageStatus: 'ready',
+    videoNeedsReview: false,
     done: false,
   },
   {
@@ -40,6 +47,13 @@ export const DEFAULT_SCENES = [
     title: 'Scene 2: Problem Statement',
     prompt:
       'Medium close-up of protagonist analyzing multi-screen AI telemetry as neural network nodes pulse with urgent amber alerts.',
+    videoPrompt:
+      'Medium close-up of protagonist analyzing multi-screen AI telemetry as neural network nodes pulse with urgent amber alerts.',
+    imagePrompt:
+      'Medium close-up portrait of protagonist illuminated by ambient blue screen glow, intense focused expression, detailed tactical jacket, blurred neural network telemetry in background.',
+    imageAsset: null,
+    imageStatus: 'ready',
+    videoNeedsReview: false,
     done: false,
   },
   {
@@ -48,6 +62,13 @@ export const DEFAULT_SCENES = [
     title: 'Scene 3: AI Pipeline Solution',
     prompt:
       'Dynamic 3D camera pan across Claude, ChatGPT, Gemini neural pathways connecting into a unified creator command center.',
+    videoPrompt:
+      'Dynamic 3D camera pan across Claude, ChatGPT, Gemini neural pathways connecting into a unified creator command center.',
+    imagePrompt:
+      'Isometric architectural view of interconnected neural data streams and fiber optic conduits flowing into a central glowing quantum core, vibrant cybernetic aesthetic, volumetric lighting.',
+    imageAsset: null,
+    imageStatus: 'ready',
+    videoNeedsReview: false,
     done: false,
   },
 ];
@@ -78,6 +99,26 @@ export function validateSceneCard(scene) {
 
   if (typeof scene.prompt !== 'string') {
     errors.push('Scene prompt must be a string');
+  }
+
+  if (scene.videoPrompt !== undefined && typeof scene.videoPrompt !== 'string') {
+    errors.push('Scene videoPrompt must be a string if provided');
+  }
+
+  if (scene.imagePrompt !== undefined && typeof scene.imagePrompt !== 'string') {
+    errors.push('Scene imagePrompt must be a string if provided');
+  }
+
+  if (scene.imageAsset !== undefined && scene.imageAsset !== null && typeof scene.imageAsset !== 'object') {
+    errors.push('Scene imageAsset must be an object or null if provided');
+  }
+
+  if (scene.imageStatus !== undefined && typeof scene.imageStatus !== 'string') {
+    errors.push('Scene imageStatus must be a string if provided');
+  }
+
+  if (scene.videoNeedsReview !== undefined && typeof scene.videoNeedsReview !== 'boolean') {
+    errors.push('Scene videoNeedsReview must be a boolean if provided');
   }
 
   return {
@@ -307,7 +348,12 @@ export function exportProjectToJson(project) {
       id: s.id,
       sceneNumber: s.sceneNumber,
       title: s.title,
-      prompt: s.prompt,
+      prompt: s.prompt || s.videoPrompt || '',
+      videoPrompt: s.videoPrompt || s.prompt || '',
+      imagePrompt: s.imagePrompt || '',
+      imageAsset: s.imageAsset || null,
+      imageStatus: s.imageStatus || (s.imagePrompt ? 'ready' : 'none'),
+      videoNeedsReview: Boolean(s.videoNeedsReview),
       done: Boolean(s.done),
     })),
     metadata: {

@@ -31,11 +31,14 @@ import {
   HelpCircle,
   Send,
   Clock,
-  Share2
+  Share2,
+  Image as ImageIcon,
+  Film,
+  Paperclip
 } from 'lucide-react';
 import { MODES, WEBVIEWS } from '../constants';
 import { injectTextToWebview, injectFreshGemini, DELIVERY_STATUS } from '../utils/webviewInjection';
-import { parsePromptText } from '../utils/sceneParser';
+import { parsePromptText, deriveImagePrompt } from '../utils/sceneParser';
 import PublishingKitPanel from './PublishingKitPanel';
 import { computeStoryboardFingerprint } from '../utils/publishingKitGenerator';
 import {
@@ -145,6 +148,15 @@ export default function PipelineSidebar({
 
   // Scene Prompt Preview & Quality Gate Modal State
   const [previewScene, setPreviewScene] = useState(null);
+  const [previewPromptType, setPreviewPromptType] = useState('video'); // 'video' | 'image'
+
+  // Per-card prompt tab state ('video' | 'image')
+  const [cardPromptTabs, setCardPromptTabs] = useState({});
+  // Asset load errors tracking by scene ID
+  const [assetLoadErrors, setAssetLoadErrors] = useState({});
+  // Asset file input ref and target scene tracker
+  const assetFileInputRef = useRef(null);
+  const [targetSceneForAsset, setTargetSceneForAsset] = useState(null);
 
   // Project management modals
   const [isProjectDropdownOpen, setIsProjectDropdownOpen] = useState(false);
@@ -595,6 +607,11 @@ export default function PipelineSidebar({
       sceneNumber: nextNumber,
       title: `Scene ${nextNumber}: New Scene`,
       prompt: 'Cinematic shot description...',
+      videoPrompt: 'Cinematic shot description...',
+      imagePrompt: 'Static cinematic shot: Main subject and environment...',
+      imageAsset: null,
+      imageStatus: 'ready',
+      videoNeedsReview: false,
       done: false,
     };
     updateActiveProject((p) => ({
@@ -618,8 +635,177 @@ export default function PipelineSidebar({
   const handleUpdateScene = (id, field, value) => {
     updateActiveProject((p) => ({
       ...p,
-      scenes: p.scenes.map((s) => (s.id === id ? { ...s, [field]: value } : s)),
+      scenes: p.scenes.map((s) => {
+        if (s.id === id) {
+          const updated = { ...s, [field]: value };
+          if (field === 'prompt') {
+            updated.videoPrompt = value;
+          } else if (field === 'videoPrompt') {
+            updated.prompt = value;
+          }
+          return updated;
+        }
+        return s;
+      }),
     }));
+  };
+
+  const handleTriggerAttachAsset = (sceneId) => {
+    setTargetSceneForAsset(sceneId);
+    if (assetFileInputRef.current) {
+      assetFileInputRef.current.value = '';
+      assetFileInputRef.current.click();
+    }
+  };
+
+  const handleAssetFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !targetSceneForAsset) return;
+
+    const objectUrl = URL.createObjectURL(file);
+    const asset = {
+      name: file.name,
+      path: file.path || file.name,
+      previewUrl: objectUrl,
+      size: file.size,
+      type: file.type,
+      status: 'attached',
+      referenceType: 'reference',
+      attachedAt: Date.now(),
+    };
+
+    updateActiveProject((p) => ({
+      ...p,
+      scenes: p.scenes.map((s) =>
+        s.id === targetSceneForAsset
+          ? {
+              ...s,
+              imageAsset: asset,
+              imageStatus: 'attached',
+              videoNeedsReview: true,
+            }
+          : s
+      ),
+    }));
+
+    setAssetLoadErrors((prev) => ({ ...prev, [targetSceneForAsset]: false }));
+    showToast(`✓ Image attached to scene as visual reference.`, 'success');
+    e.target.value = '';
+    setTargetSceneForAsset(null);
+  };
+
+  const handleUpdateAssetRefType = (sceneId, referenceType) => {
+    updateActiveProject((p) => ({
+      ...p,
+      scenes: p.scenes.map((s) =>
+        s.id === sceneId && s.imageAsset
+          ? {
+              ...s,
+              imageAsset: {
+                ...s.imageAsset,
+                referenceType,
+              },
+            }
+          : s
+      ),
+    }));
+    showToast(`✓ Image asset usage set to: ${referenceType}`, 'info');
+  };
+
+  const handleRemoveAsset = (sceneId) => {
+    updateActiveProject((p) => ({
+      ...p,
+      scenes: p.scenes.map((s) =>
+        s.id === sceneId
+          ? {
+              ...s,
+              imageAsset: null,
+              imageStatus: s.imagePrompt ? 'ready' : 'none',
+            }
+          : s
+      ),
+    }));
+    setAssetLoadErrors((prev) => ({ ...prev, [sceneId]: false }));
+    showToast('Image asset detached from scene.', 'info');
+  };
+
+  const handleDismissVideoReview = (sceneId) => {
+    updateActiveProject((p) => ({
+      ...p,
+      scenes: p.scenes.map((s) =>
+        s.id === sceneId ? { ...s, videoNeedsReview: false } : s
+      ),
+    }));
+  };
+
+  const handleCopyImagePrompt = async (scene) => {
+    const composition = composeProductionPrompt({
+      scene,
+      globalRules: activeProject.globalRules,
+      includeGlobalRules: true,
+      promptType: 'image',
+    });
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(composition.composedPrompt);
+      showToast(`✓ Image prompt for Scene ${scene.sceneNumber} copied!`, 'success');
+    }
+  };
+
+  const handleCopyVideoPrompt = async (scene) => {
+    const composition = composeProductionPrompt({
+      scene,
+      globalRules: activeProject.globalRules,
+      includeGlobalRules: true,
+      promptType: 'video',
+    });
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(composition.composedPrompt);
+      showToast(`✓ Video prompt for Scene ${scene.sceneNumber} copied!`, 'success');
+    }
+  };
+
+  const handleSendImageToGemini = async (scene) => {
+    if (deliveringAction) return;
+    setDeliveringAction({ sceneId: scene.id, target: 'gemini-image' });
+
+    const composition = composeProductionPrompt({
+      scene,
+      globalRules: activeProject.globalRules,
+      includeGlobalRules: true,
+      promptType: 'image',
+    });
+
+    try {
+      const res = await injectTextToWebview(WEBVIEWS.GEMINI.id, composition.composedPrompt);
+
+      if (res.status === DELIVERY_STATUS.INSERTED) {
+        if (setGeminiCounter) {
+          setGeminiCounter((prev) => Math.min(prev + 1, 4));
+        }
+        showToast(
+          `🖼️ Gemini: Image prompt inserted for visual reference! (Load: ${Math.min((geminiCounter || 0) + 1, 4)}/4)`,
+          'success'
+        );
+      } else if (res.status === DELIVERY_STATUS.COPIED) {
+        showToast(
+          '📋 Image prompt copied to clipboard for manual paste (Ctrl+V) into Gemini.',
+          'info'
+        );
+      } else {
+        showToast(`⚠️ Gemini delivery failed: ${res.error || res.reason || 'Input unavailable'}`, 'error');
+      }
+    } catch {
+      showToast('Failed to deliver image prompt to Gemini.', 'error');
+    } finally {
+      setDeliveringAction(null);
+    }
+  };
+
+  const handleDeriveImagePrompt = (scene) => {
+    const derived = deriveImagePrompt(scene.videoPrompt || scene.prompt, activeProject.globalRules);
+    handleUpdateScene(scene.id, 'imagePrompt', derived);
+    handleUpdateScene(scene.id, 'imageStatus', 'ready');
+    showToast(`✓ Generated image prompt for Scene ${scene.sceneNumber}.`, 'success');
   };
 
   const handleUpdateGlobalRules = (val) => {
@@ -637,8 +823,10 @@ export default function PipelineSidebar({
     const q = searchQuery.toLowerCase();
     const matchTitle = (scene.title || '').toLowerCase().includes(q);
     const matchPrompt = (scene.prompt || '').toLowerCase().includes(q);
+    const matchVideo = (scene.videoPrompt || '').toLowerCase().includes(q);
+    const matchImage = (scene.imagePrompt || '').toLowerCase().includes(q);
     const matchNum = String(scene.sceneNumber || '').includes(q);
-    return matchTitle || matchPrompt || matchNum;
+    return matchTitle || matchPrompt || matchVideo || matchImage || matchNum;
   };
 
   const activeScenes = scenes.filter((s) => !s.done && matchesSearch(s));
@@ -652,6 +840,9 @@ export default function PipelineSidebar({
     const isEditing = editingCardId === scene.id;
     const isGeminiFull = (geminiCounter || 0) >= 4;
     const isThisDelivering = deliveringAction?.sceneId === scene.id;
+    const activePromptTab = cardPromptTabs[scene.id] || 'video';
+    const hasAsset = Boolean(scene.imageAsset);
+    const isAssetMissing = Boolean(assetLoadErrors[scene.id]);
 
     return (
       <div
@@ -716,7 +907,10 @@ export default function PipelineSidebar({
 
             {/* Prompt Preview & Quality Gate Tool */}
             <button
-              onClick={() => setPreviewScene(scene)}
+              onClick={() => {
+                setPreviewPromptType(activePromptTab);
+                setPreviewScene(scene);
+              }}
               aria-label={`Preview composed prompt for scene ${scene.sceneNumber}`}
               className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-purple-300 transition focus-visible:ring-1 focus-visible:ring-purple-400 focus:outline-none"
               title="Preview Final Prompt & Quality Checks"
@@ -749,84 +943,275 @@ export default function PipelineSidebar({
           </div>
         </div>
 
-        {/* Scene Prompt Text */}
-        {isEditing ? (
-          <textarea
-            value={scene.prompt}
-            onChange={(e) =>
-              handleUpdateScene(scene.id, 'prompt', e.target.value)
-            }
-            rows={3}
-            className="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-slate-300 text-[11px] font-mono resize-none focus:outline-none focus:ring-1 focus:ring-purple-400"
-          />
-        ) : (
-          <p className="text-[11px] text-slate-400 font-mono leading-relaxed line-clamp-3 select-text bg-slate-900/50 p-1.5 rounded border border-slate-900">
-            {scene.prompt}
-          </p>
-        )}
-
-        {/* Action Delivery Buttons */}
-        <div className="flex items-center gap-1.5 pt-1 border-t border-slate-900/80">
-          {/* Button 1: Inject Scene Only to Gemini */}
+        {/* Prompt Type Selector Pill */}
+        <div className="flex items-center bg-slate-900/90 rounded-lg p-0.5 border border-slate-800 text-[10px]">
           <button
-            onClick={() => handleSendToGemini(scene)}
-            disabled={isThisDelivering}
-            aria-label={`Inject scene ${scene.sceneNumber} to Gemini`}
-            className={`flex-1 py-1 px-1.5 rounded text-[10px] font-medium flex items-center justify-center gap-1 transition shadow-sm focus-visible:ring-1 focus-visible:ring-sky-400 focus:outline-none ${
-              isThisDelivering && deliveringAction?.target === 'gemini'
-                ? 'bg-slate-800 text-slate-400 cursor-wait'
-                : isGeminiFull
-                ? 'bg-slate-800 hover:bg-slate-700 text-slate-400'
-                : 'bg-sky-600/80 hover:bg-sky-500 text-white'
+            onClick={() => setCardPromptTabs((prev) => ({ ...prev, [scene.id]: 'image' }))}
+            aria-label={`Switch to image prompt for scene ${scene.sceneNumber}`}
+            className={`flex-1 py-0.5 px-2 rounded font-medium flex items-center justify-center gap-1 transition ${
+              activePromptTab === 'image'
+                ? 'bg-purple-950/80 text-purple-200 border border-purple-800/60 shadow-sm'
+                : 'text-slate-400 hover:text-slate-200'
             }`}
-            title="Inject scene prompt into Gemini webview input"
           >
-            {isThisDelivering && deliveringAction?.target === 'gemini' ? (
-              <Loader2 className="w-2.5 h-2.5 animate-spin" />
-            ) : (
-              <ArrowRight className="w-2.5 h-2.5" />
-            )}
-            <span>Inject Scene</span>
+            <ImageIcon className="w-2.5 h-2.5 text-emerald-400" />
+            <span>Image Prompt</span>
+            {hasAsset ? (
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" title="Asset attached" />
+            ) : scene.imagePrompt ? (
+              <span className="w-1.5 h-1.5 rounded-full bg-sky-400" title="Prompt ready" />
+            ) : null}
           </button>
-
-          {/* Button 2: Fresh Gemini + Global + Scene */}
           <button
-            onClick={() => handleFreshGeminiGlobal(scene)}
-            disabled={isThisDelivering}
-            aria-label={`Fresh session with Global Rules and scene ${scene.sceneNumber} to Gemini`}
-            className={`flex-1 py-1 px-1.5 rounded text-[10px] font-medium flex items-center justify-center gap-1 transition shadow-sm focus-visible:ring-1 focus-visible:ring-amber-400 focus:outline-none ${
-              isThisDelivering && deliveringAction?.target === 'gemini-fresh'
-                ? 'bg-slate-800 text-slate-400 cursor-wait'
-                : isGeminiFull
-                ? 'bg-amber-600 hover:bg-amber-500 text-white font-semibold animate-pulse ring-1 ring-amber-400'
-                : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+            onClick={() => setCardPromptTabs((prev) => ({ ...prev, [scene.id]: 'video' }))}
+            aria-label={`Switch to video prompt for scene ${scene.sceneNumber}`}
+            className={`flex-1 py-0.5 px-2 rounded font-medium flex items-center justify-center gap-1 transition ${
+              activePromptTab === 'video'
+                ? 'bg-purple-950/80 text-purple-200 border border-purple-800/60 shadow-sm'
+                : 'text-slate-400 hover:text-slate-200'
             }`}
-            title="Open fresh Gemini chat, wait for load, and inject Global Rules + Scene Prompt together"
           >
-            {isThisDelivering && deliveringAction?.target === 'gemini-fresh' ? (
-              <Loader2 className="w-2.5 h-2.5 animate-spin text-amber-300" />
-            ) : (
-              <RefreshCw className="w-2.5 h-2.5 text-amber-300" />
+            <Film className="w-2.5 h-2.5 text-purple-400" />
+            <span>Video Prompt</span>
+            {scene.videoNeedsReview && (
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" title="Needs review (image reference changed)" />
             )}
-            <span>Fresh + Global</span>
-          </button>
-
-          {/* Button 3: Send to Google Flow (Feature B: Opens Confirmation First) */}
-          <button
-            onClick={() => handleRequestFlowSend(scene)}
-            disabled={isThisDelivering}
-            aria-label={`Inject scene ${scene.sceneNumber} to Google Flow`}
-            className="flex-1 py-1 px-1.5 rounded bg-purple-600/80 hover:bg-purple-500 text-white text-[10px] font-medium flex items-center justify-center gap-1 transition shadow-sm focus-visible:ring-1 focus-visible:ring-purple-400 focus:outline-none disabled:opacity-50"
-            title="Confirm and send prompt to Google Flow"
-          >
-            {isThisDelivering && deliveringAction?.target === 'flow' ? (
-              <Loader2 className="w-2.5 h-2.5 animate-spin" />
-            ) : (
-              <Sparkles className="w-2.5 h-2.5" />
-            )}
-            <span>🎬 Flow</span>
           </button>
         </div>
+
+        {/* Tab 1: Image Prompt View / Edit */}
+        {activePromptTab === 'image' && (
+          <div className="flex flex-col gap-1.5">
+            {/* Image Prompt Text */}
+            {isEditing ? (
+              <textarea
+                value={scene.imagePrompt || ''}
+                onChange={(e) =>
+                  handleUpdateScene(scene.id, 'imagePrompt', e.target.value)
+                }
+                rows={3}
+                placeholder="Enter still image prompt (subject, framing, lighting, style)..."
+                className="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-slate-300 text-[11px] font-mono resize-none focus:outline-none focus:ring-1 focus:ring-emerald-400"
+              />
+            ) : (
+              <p className="text-[11px] text-slate-300 font-mono leading-relaxed line-clamp-3 select-text bg-slate-900/50 p-1.5 rounded border border-slate-900">
+                {scene.imagePrompt || (
+                  <span className="text-slate-500 italic">No image prompt yet. Click "Derive" or edit to write one.</span>
+                )}
+              </p>
+            )}
+
+            {/* Asset Attachment Section */}
+            {hasAsset ? (
+              <div className="p-1.5 rounded-lg bg-slate-900/80 border border-slate-800 flex items-center justify-between gap-1.5 text-[10px]">
+                <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                  {scene.imageAsset.previewUrl && !isAssetMissing ? (
+                    <img
+                      src={scene.imageAsset.previewUrl}
+                      alt={scene.imageAsset.name}
+                      onError={() => setAssetLoadErrors((prev) => ({ ...prev, [scene.id]: true }))}
+                      className="w-6 h-6 object-cover rounded border border-slate-700 flex-shrink-0"
+                    />
+                  ) : (
+                    <ImageIcon className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                  )}
+                  <div className="flex flex-col min-w-0">
+                    <span className="font-medium text-slate-200 truncate">{scene.imageAsset.name}</span>
+                    <span className="text-[9px] text-slate-500 font-mono">
+                      {isAssetMissing ? '⚠️ File unavailable' : scene.imageAsset.referenceType === 'both' ? 'Reference + Final' : scene.imageAsset.referenceType === 'final' ? 'Final Asset' : 'Video Reference'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  <select
+                    value={scene.imageAsset.referenceType || 'reference'}
+                    onChange={(e) => handleUpdateAssetRefType(scene.id, e.target.value)}
+                    className="bg-slate-950 border border-slate-700 text-slate-300 rounded px-1 py-0.5 text-[9px] focus:outline-none"
+                    title="Asset role"
+                  >
+                    <option value="reference">Reference</option>
+                    <option value="final">Final</option>
+                    <option value="both">Both</option>
+                  </select>
+                  <button
+                    onClick={() => handleTriggerAttachAsset(scene.id)}
+                    className="p-1 text-slate-400 hover:text-slate-200 rounded hover:bg-slate-800"
+                    title="Replace Image"
+                  >
+                    <RefreshCw className="w-2.5 h-2.5" />
+                  </button>
+                  <button
+                    onClick={() => handleRemoveAsset(scene.id)}
+                    className="p-1 text-slate-400 hover:text-rose-400 rounded hover:bg-slate-800"
+                    title="Remove Asset"
+                  >
+                    <X className="w-2.5 h-2.5" />
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => handleTriggerAttachAsset(scene.id)}
+                className="w-full py-1 px-2 rounded border border-dashed border-slate-800 hover:border-slate-700 bg-slate-950/40 hover:bg-slate-900/60 text-slate-400 hover:text-slate-200 text-[10px] flex items-center justify-center gap-1.5 transition"
+                title="Attach generated image as visual reference or final asset"
+              >
+                <Paperclip className="w-2.5 h-2.5 text-emerald-400" />
+                <span>Attach Image (Reference / Final)</span>
+              </button>
+            )}
+
+            {/* Image Action Buttons */}
+            <div className="flex items-center gap-1.5 pt-1 border-t border-slate-900/80">
+              <button
+                onClick={() => handleCopyImagePrompt(scene)}
+                aria-label={`Copy image prompt for scene ${scene.sceneNumber}`}
+                className="flex-1 py-1 px-1.5 rounded bg-slate-800 hover:bg-slate-750 text-slate-200 text-[10px] font-medium flex items-center justify-center gap-1 transition shadow-sm focus-visible:ring-1 focus-visible:ring-emerald-400 focus:outline-none"
+                title="Copy composed image prompt with Global Rules"
+              >
+                <Copy className="w-2.5 h-2.5 text-emerald-400" />
+                <span>Copy Image</span>
+              </button>
+
+              <button
+                onClick={() => handleSendImageToGemini(scene)}
+                disabled={isThisDelivering}
+                aria-label={`Send image prompt for scene ${scene.sceneNumber} to Gemini`}
+                className={`flex-1 py-1 px-1.5 rounded text-[10px] font-medium flex items-center justify-center gap-1 transition shadow-sm focus-visible:ring-1 focus-visible:ring-sky-400 focus:outline-none ${
+                  isThisDelivering && deliveringAction?.target === 'gemini-image'
+                    ? 'bg-slate-800 text-slate-400 cursor-wait'
+                    : 'bg-emerald-600/80 hover:bg-emerald-500 text-white'
+                }`}
+                title="Inject image prompt into Gemini workspace for reference generation"
+              >
+                {isThisDelivering && deliveringAction?.target === 'gemini-image' ? (
+                  <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                ) : (
+                  <Sparkles className="w-2.5 h-2.5 text-amber-300" />
+                )}
+                <span>Gemini (Visual)</span>
+              </button>
+
+              <button
+                onClick={() => handleDeriveImagePrompt(scene)}
+                aria-label={`Synthesize image prompt from video description for scene ${scene.sceneNumber}`}
+                className="py-1 px-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 text-[10px] transition"
+                title="Synthesize/Reset still image prompt from scene video prompt"
+              >
+                <RotateCcw className="w-2.5 h-2.5" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Tab 2: Video Prompt View / Edit */}
+        {activePromptTab === 'video' && (
+          <div className="flex flex-col gap-1.5">
+            {/* Needs Review Alert if image changed */}
+            {scene.videoNeedsReview && (
+              <div className="p-1.5 rounded-lg bg-amber-950/40 border border-amber-800/50 text-amber-200 text-[10px] flex items-center justify-between gap-1.5">
+                <span className="truncate">⚠️ Image reference updated. Check video continuity.</span>
+                <button
+                  onClick={() => handleDismissVideoReview(scene.id)}
+                  className="px-1.5 py-0.5 rounded bg-amber-900/60 hover:bg-amber-800 text-amber-200 font-semibold text-[9px] flex-shrink-0"
+                  title="Mark video prompt as reviewed"
+                >
+                  Reviewed ✓
+                </button>
+              </div>
+            )}
+
+            {/* Video Prompt Text */}
+            {isEditing ? (
+              <textarea
+                value={scene.videoPrompt || scene.prompt || ''}
+                onChange={(e) =>
+                  handleUpdateScene(scene.id, 'videoPrompt', e.target.value)
+                }
+                rows={3}
+                placeholder="Enter video prompt (camera motion, action, lighting, pacing)..."
+                className="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-slate-300 text-[11px] font-mono resize-none focus:outline-none focus:ring-1 focus:ring-purple-400"
+              />
+            ) : (
+              <p className="text-[11px] text-slate-400 font-mono leading-relaxed line-clamp-3 select-text bg-slate-900/50 p-1.5 rounded border border-slate-900">
+                {scene.videoPrompt || scene.prompt}
+              </p>
+            )}
+
+            {/* Video Action Delivery Buttons */}
+            <div className="flex items-center gap-1.5 pt-1 border-t border-slate-900/80">
+              {/* Copy Video Button */}
+              <button
+                onClick={() => handleCopyVideoPrompt(scene)}
+                aria-label={`Copy video prompt for scene ${scene.sceneNumber}`}
+                className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition"
+                title="Copy composed video prompt to clipboard"
+              >
+                <Copy className="w-2.5 h-2.5" />
+              </button>
+
+              {/* Button 1: Inject Scene Only to Gemini */}
+              <button
+                onClick={() => handleSendToGemini(scene)}
+                disabled={isThisDelivering}
+                aria-label={`Inject scene ${scene.sceneNumber} to Gemini`}
+                className={`flex-1 py-1 px-1 rounded text-[10px] font-medium flex items-center justify-center gap-1 transition shadow-sm focus-visible:ring-1 focus-visible:ring-sky-400 focus:outline-none ${
+                  isThisDelivering && deliveringAction?.target === 'gemini'
+                    ? 'bg-slate-800 text-slate-400 cursor-wait'
+                    : isGeminiFull
+                    ? 'bg-slate-800 hover:bg-slate-700 text-slate-400'
+                    : 'bg-sky-600/80 hover:bg-sky-500 text-white'
+                }`}
+                title="Inject scene prompt into Gemini webview input"
+              >
+                {isThisDelivering && deliveringAction?.target === 'gemini' ? (
+                  <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                ) : (
+                  <ArrowRight className="w-2.5 h-2.5" />
+                )}
+                <span>Inject</span>
+              </button>
+
+              {/* Button 2: Fresh Gemini + Global + Scene */}
+              <button
+                onClick={() => handleFreshGeminiGlobal(scene)}
+                disabled={isThisDelivering}
+                aria-label={`Fresh session with Global Rules and scene ${scene.sceneNumber} to Gemini`}
+                className={`flex-1 py-1 px-1 rounded text-[10px] font-medium flex items-center justify-center gap-1 transition shadow-sm focus-visible:ring-1 focus-visible:ring-amber-400 focus:outline-none ${
+                  isThisDelivering && deliveringAction?.target === 'gemini-fresh'
+                    ? 'bg-slate-800 text-slate-400 cursor-wait'
+                    : isGeminiFull
+                    ? 'bg-amber-600 hover:bg-amber-500 text-white font-semibold animate-pulse ring-1 ring-amber-400'
+                    : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                }`}
+                title="Open fresh Gemini chat, wait for load, and inject Global Rules + Scene Prompt together"
+              >
+                {isThisDelivering && deliveringAction?.target === 'gemini-fresh' ? (
+                  <Loader2 className="w-2.5 h-2.5 animate-spin text-amber-300" />
+                ) : (
+                  <RefreshCw className="w-2.5 h-2.5 text-amber-300" />
+                )}
+                <span>Fresh</span>
+              </button>
+
+              {/* Button 3: Send to Google Flow (Feature B: Opens Confirmation First) */}
+              <button
+                onClick={() => handleRequestFlowSend(scene)}
+                disabled={isThisDelivering}
+                aria-label={`Inject scene ${scene.sceneNumber} to Google Flow`}
+                className="flex-1 py-1 px-1 rounded bg-purple-600/80 hover:bg-purple-500 text-white text-[10px] font-medium flex items-center justify-center gap-1 transition shadow-sm focus-visible:ring-1 focus-visible:ring-purple-400 focus:outline-none disabled:opacity-50"
+                title="Confirm and send prompt to Google Flow"
+              >
+                {isThisDelivering && deliveringAction?.target === 'flow' ? (
+                  <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                ) : (
+                  <Sparkles className="w-2.5 h-2.5" />
+                )}
+                <span>🎬 Flow</span>
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -845,6 +1230,15 @@ export default function PipelineSidebar({
         ref={fileInputRef}
         onChange={handleFileChange}
         accept=".json"
+        className="hidden"
+      />
+
+      {/* Hidden File Input for Scene Image Asset Attachment */}
+      <input
+        type="file"
+        ref={assetFileInputRef}
+        onChange={handleAssetFileChange}
+        accept="image/*"
         className="hidden"
       />
 
@@ -1798,15 +2192,22 @@ export default function PipelineSidebar({
                 {/* Parsed Scenes Preview List */}
                 <div className="flex-1 overflow-y-auto space-y-2 border border-slate-800 rounded-xl p-2 bg-slate-950/40">
                   {parsedPreview.scenes.map((s, idx) => (
-                    <div key={s.id || idx} className="p-2 rounded-lg bg-slate-900 border border-slate-800">
+                    <div key={s.id || idx} className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-1">
                       <div className="font-semibold text-slate-200 text-xs mb-0.5 flex items-center justify-between">
                         <span>{s.title}</span>
                         {s.warnings && s.warnings.length > 0 && (
                           <span className="text-[10px] text-amber-400 font-mono">{s.warnings.join(' ')}</span>
                         )}
                       </div>
-                      <p className="text-slate-400 font-mono text-[11px] line-clamp-2">
-                        {s.prompt}
+                      {s.imagePrompt && (
+                        <p className="text-emerald-300/90 font-mono text-[11px] line-clamp-2">
+                          <span className="text-emerald-400 font-semibold text-[10px]">🖼️ Image: </span>
+                          {s.imagePrompt}
+                        </p>
+                      )}
+                      <p className="text-slate-300 font-mono text-[11px] line-clamp-2">
+                        <span className="text-purple-400 font-semibold text-[10px]">🎬 Video: </span>
+                        {s.videoPrompt || s.prompt}
                       </p>
                     </div>
                   ))}
@@ -1923,6 +2324,7 @@ Medium close-up of protagonist analyzing AI telemetry...`}
           scene: previewScene,
           globalRules: activeProject.globalRules,
           includeGlobalRules: true,
+          promptType: previewPromptType,
         });
 
         const quality = evaluatePromptQuality({
@@ -1930,6 +2332,7 @@ Medium close-up of protagonist analyzing AI telemetry...`}
           composedPrompt: composition.composedPrompt,
           globalRules: activeProject.globalRules,
           project: activeProject,
+          promptType: previewPromptType,
         });
 
         return (
@@ -1957,7 +2360,7 @@ Medium close-up of protagonist analyzing AI telemetry...`}
                       </span>
                     </h3>
                     <p className="text-[11px] text-slate-400">
-                      Deterministic prompt composition preview and generator readiness check.
+                      Deterministic {previewPromptType === 'image' ? 'Image' : 'Video'} prompt composition preview and generator readiness check.
                     </p>
                   </div>
                 </div>
@@ -1972,6 +2375,35 @@ Medium close-up of protagonist analyzing AI telemetry...`}
 
               {/* Body */}
               <div className="p-5 flex-1 flex flex-col gap-3 overflow-y-auto text-xs">
+                {/* Prompt Type Tabs in Modal */}
+                <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-[11px]">
+                  <button
+                    onClick={() => setPreviewPromptType('video')}
+                    className={`flex-1 py-1 px-3 rounded-lg font-medium flex items-center justify-center gap-1.5 transition ${
+                      previewPromptType === 'video'
+                        ? 'bg-purple-950/80 text-purple-200 border border-purple-800/60 shadow-sm'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <Film className="w-3.5 h-3.5 text-purple-400" />
+                    <span>Video Prompt</span>
+                  </button>
+                  <button
+                    onClick={() => setPreviewPromptType('image')}
+                    className={`flex-1 py-1 px-3 rounded-lg font-medium flex items-center justify-center gap-1.5 transition ${
+                      previewPromptType === 'image'
+                        ? 'bg-purple-950/80 text-purple-200 border border-purple-800/60 shadow-sm'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <ImageIcon className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Image Prompt</span>
+                    {previewScene.imageAsset && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" title="Asset attached" />
+                    )}
+                  </button>
+                </div>
+
                 {/* Stats Bar */}
                 <div className="flex items-center justify-between p-2.5 rounded-lg bg-slate-950 border border-slate-800 text-[11px] font-mono">
                   <span className="text-slate-300">
@@ -1983,6 +2415,11 @@ Medium close-up of protagonist analyzing AI telemetry...`}
                   <span className="text-slate-300">
                     Global Rules: <span className="text-amber-400 font-semibold">{composition.hasGlobalRules ? 'Included' : 'None'}</span>
                   </span>
+                  {composition.hasReferenceDirective && (
+                    <span className="text-slate-300">
+                      Ref: <span className="text-emerald-400 font-semibold">Active</span>
+                    </span>
+                  )}
                 </div>
 
                 {/* Quality Checks Breakdown */}
@@ -2005,7 +2442,9 @@ Medium close-up of protagonist analyzing AI telemetry...`}
 
                 {/* Composed Prompt Preview */}
                 <div className="flex flex-col gap-1">
-                  <span className="font-medium text-slate-300">Exact Delivered Prompt Preview:</span>
+                  <span className="font-medium text-slate-300">
+                    Exact Delivered {previewPromptType === 'image' ? 'Image' : 'Video'} Prompt Preview:
+                  </span>
                   <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 font-mono text-[11px] leading-relaxed max-h-48 overflow-y-auto select-text whitespace-pre-wrap">
                     {composition.composedPrompt}
                   </div>
@@ -2025,7 +2464,7 @@ Medium close-up of protagonist analyzing AI telemetry...`}
                     onClick={async () => {
                       if (navigator.clipboard?.writeText) {
                         await navigator.clipboard.writeText(composition.composedPrompt);
-                        showToast('✓ Composed prompt copied to clipboard!', 'success');
+                        showToast(`✓ Composed ${previewPromptType} prompt copied to clipboard!`, 'success');
                       }
                     }}
                     className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition flex items-center gap-1.5"
@@ -2033,17 +2472,32 @@ Medium close-up of protagonist analyzing AI telemetry...`}
                     <Copy className="w-3.5 h-3.5" />
                     <span>Copy Composed</span>
                   </button>
-                  <button
-                    onClick={() => {
-                      const targetScene = previewScene;
-                      setPreviewScene(null);
-                      handleRequestFlowSend(targetScene);
-                    }}
-                    className="px-4 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold shadow-lg shadow-purple-600/20 flex items-center gap-1.5 transition"
-                  >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>Send to Google Flow</span>
-                  </button>
+
+                  {previewPromptType === 'image' ? (
+                    <button
+                      onClick={() => {
+                        const targetScene = previewScene;
+                        setPreviewScene(null);
+                        handleSendImageToGemini(targetScene);
+                      }}
+                      className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-lg shadow-emerald-600/20 flex items-center gap-1.5 transition"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                      <span>Send to Gemini</span>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        const targetScene = previewScene;
+                        setPreviewScene(null);
+                        handleRequestFlowSend(targetScene);
+                      }}
+                      className="px-4 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold shadow-lg shadow-purple-600/20 flex items-center gap-1.5 transition"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Send to Google Flow</span>
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

@@ -5,11 +5,27 @@
  */
 
 /**
+ * @typedef {Object} SceneImageAsset
+ * @property {string} name - Asset filename or title
+ * @property {string} path - File path or URL
+ * @property {string} [previewUrl] - Optional preview object URL or data URI
+ * @property {'attached' | 'missing' | 'none'} status - Asset availability state
+ * @property {'reference' | 'final' | 'both'} referenceType - Purpose of image asset
+ * @property {number} [attachedAt] - Timestamp when attached
+ * @property {string} [notes] - Optional user reference notes
+ */
+
+/**
  * @typedef {Object} ParsedScene
  * @property {string} id - Stable unique identifier for the scene card
  * @property {number} sceneNumber - Integer scene number (can be non-sequential)
  * @property {string} title - Formatted title (e.g. "Scene 1: Opening Hook")
- * @property {string} prompt - Multiline visual/animation prompt
+ * @property {string} prompt - Multiline video/animation prompt (canonical backward-compatible field)
+ * @property {string} [videoPrompt] - Dedicated video animation prompt
+ * @property {string} [imagePrompt] - Dedicated still image generation prompt
+ * @property {SceneImageAsset|null} [imageAsset] - Associated image reference/asset metadata
+ * @property {string} [imageStatus] - Workflow status ('none' | 'ready' | 'attached')
+ * @property {boolean} [videoNeedsReview] - Whether video prompt needs review following image change
  * @property {boolean} done - Initial completion state (default false)
  * @property {string[]} [warnings] - Specific scene-level warnings
  */
@@ -24,6 +40,118 @@
  * @property {string[]} notices - Informational notices
  * @property {string[]} unparsedContent - Content blocks not recognized as rules or scenes
  */
+
+/**
+ * Derives a coherent still image generation prompt from a scene prompt and global rules.
+ * Converts motion/camera action phrasing into a still visual moment and enforces clean visuals.
+ * @param {string} scenePrompt
+ * @param {string} [globalRules='']
+ * @returns {string}
+ */
+export function deriveImagePrompt(scenePrompt, _globalRules = '') {
+  if (!scenePrompt || typeof scenePrompt !== 'string') return '';
+  let cleaned = scenePrompt.trim();
+
+  // Strip explicit video/motion prompt prefixes if present
+  cleaned = cleaned
+    .replace(/^(?:VIDEO\s+(?:GENERATION\s+)?PROMPT|MOTION\s+PROMPT|VIDEO)[:\s\-–—]*/i, '')
+    .trim();
+
+  // Strip common camera motion directives to convert to a still moment
+  cleaned = cleaned
+    .replace(/\b(?:camera\s+(?:moves|tracks|pans|tilts|zooms|pushes|pulls|rotates|glides)\s+(?:slowly|rapidly|smoothly|forward|backward|in|out|across|through|over|around|past)?)\b/gi, 'Still visual capture of')
+    .replace(/\b(?:slow\s+(?:pan|zoom|push-in|pull-out|tilt|tracking\s+shot)\s+(?:across|through|over|around)?)\b/gi, 'Cinematic composition of')
+    .replace(/\b(?:pan\s+to|cut\s+to|fades\s+to|zoom\s+in\s+on)\b/gi, 'Detailed view of')
+    .trim();
+
+  // Normalize duplicate spaces
+  cleaned = cleaned.replace(/\s{2,}/g, ' ');
+
+  if (cleaned.length < 10) {
+    cleaned = scenePrompt.trim();
+  }
+
+  // Prepend framing clarity if not already starting with shot framing
+  const hasFraming = /^(?:cinematic|wide|close-up|medium|establishing|macro|overhead|low[\s-]angle|high[\s-]angle|portrait|still)\b/i.test(cleaned);
+  return hasFraming ? cleaned : `Cinematic still shot: ${cleaned}`;
+}
+
+/**
+ * Extracts and distinguishes image generation prompts and video generation prompts from a scene body.
+ * Supports explicit IMAGE PROMPT: / VIDEO PROMPT: blocks, single prompts, and variations.
+ *
+ * @param {string} sceneBody
+ * @param {string} [globalRules='']
+ * @returns {{
+ *   imagePrompt: string,
+ *   videoPrompt: string,
+ *   hasDualPrompts: boolean,
+ * }}
+ */
+export function extractImageAndVideoPrompts(sceneBody, globalRules = '') {
+  if (!sceneBody || typeof sceneBody !== 'string') {
+    return {
+      imagePrompt: '',
+      videoPrompt: '',
+      hasDualPrompts: false,
+    };
+  }
+
+  const imageHeadingRegex = /(?:^|\n)(?:#{1,4}\s*)?(?:\*\*)?(?:Image\s+(?:Generation\s+)?Prompt|Still\s+Image\s+Prompt|Image)\s*(?:\*\*)?[:\-–—]\s*/i;
+  const videoHeadingRegex = /(?:^|\n)(?:#{1,4}\s*)?(?:\*\*)?(?:Video\s+(?:Generation\s+)?Prompt|Motion\s+Prompt|Video)\s*(?:\*\*)?[:\-–—]\s*/i;
+
+  const imageMatch = sceneBody.match(imageHeadingRegex);
+  const videoMatch = sceneBody.match(videoHeadingRegex);
+
+  if (imageMatch && videoMatch) {
+    const imgIdx = imageMatch.index + imageMatch[0].length;
+    const vidIdx = videoMatch.index + videoMatch[0].length;
+
+    let imagePrompt;
+    let videoPrompt;
+
+    if (imageMatch.index < videoMatch.index) {
+      imagePrompt = sceneBody.slice(imgIdx, videoMatch.index).trim();
+      videoPrompt = sceneBody.slice(vidIdx).trim();
+    } else {
+      videoPrompt = sceneBody.slice(vidIdx, imageMatch.index).trim();
+      imagePrompt = sceneBody.slice(imgIdx).trim();
+    }
+
+    imagePrompt = imagePrompt.replace(/^\s*[-*_]{3,}\s*\n/g, '').replace(/\n\s*[-*_]{3,}\s*$/g, '').trim();
+    videoPrompt = videoPrompt.replace(/^\s*[-*_]{3,}\s*\n/g, '').replace(/\n\s*[-*_]{3,}\s*$/g, '').trim();
+
+    return {
+      imagePrompt,
+      videoPrompt,
+      hasDualPrompts: true,
+    };
+  } else if (imageMatch && !videoMatch) {
+    const imgIdx = imageMatch.index + imageMatch[0].length;
+    const imagePrompt = sceneBody.slice(imgIdx).trim();
+    const preamble = sceneBody.slice(0, imageMatch.index).trim();
+    return {
+      imagePrompt,
+      videoPrompt: preamble || imagePrompt,
+      hasDualPrompts: false,
+    };
+  } else if (!imageMatch && videoMatch) {
+    const vidIdx = videoMatch.index + videoMatch[0].length;
+    const videoPrompt = sceneBody.slice(vidIdx).trim();
+    return {
+      imagePrompt: deriveImagePrompt(videoPrompt, globalRules),
+      videoPrompt,
+      hasDualPrompts: false,
+    };
+  } else {
+    // Neither marker found: legacy format
+    return {
+      imagePrompt: deriveImagePrompt(sceneBody, globalRules),
+      videoPrompt: sceneBody.trim(),
+      hasDualPrompts: false,
+    };
+  }
+}
 
 /**
  * Parses raw text containing Global Rules and/or Scene descriptions.
@@ -264,17 +392,43 @@ export function parsePromptText(rawText, options = {}) {
     }
     previousSceneNumber = current.sceneNumber;
 
+    // Extract Image Prompt and Video Prompt
+    const { imagePrompt, videoPrompt, hasDualPrompts } = extractImageAndVideoPrompts(sceneBody, extractedRules);
+
+    // Check existing scene metadata (imageAsset, custom imagePrompt, etc.)
+    const existingScene = Array.isArray(options.existingScenes)
+      ? options.existingScenes.find((s) => s && s.sceneNumber === current.sceneNumber)
+      : null;
+
     // Use existing stable ID if available, otherwise generate deterministic ID
     const stableId =
+      existingScene?.id ||
       existingSceneMap.get(current.sceneNumber) ||
       `scene-${current.sceneNumber}-${timestamp}-${i + 1}`;
+
+    const finalImagePrompt = hasDualPrompts
+      ? imagePrompt
+      : existingScene?.imagePrompt || imagePrompt;
+
+    const finalImageAsset = existingScene?.imageAsset || null;
+    const finalImageStatus = finalImageAsset
+      ? 'attached'
+      : finalImagePrompt
+      ? 'ready'
+      : 'none';
+    const finalVideoNeedsReview = Boolean(existingScene?.videoNeedsReview);
 
     parsedScenes.push({
       id: stableId,
       sceneNumber: current.sceneNumber,
       title: finalTitle,
-      prompt: sceneBody,
-      done: false,
+      prompt: videoPrompt,
+      videoPrompt,
+      imagePrompt: finalImagePrompt,
+      imageAsset: finalImageAsset,
+      imageStatus: finalImageStatus,
+      videoNeedsReview: finalVideoNeedsReview,
+      done: existingScene ? Boolean(existingScene.done) : false,
       warnings: sceneWarnings,
     });
   }
@@ -286,7 +440,7 @@ export function parsePromptText(rawText, options = {}) {
   }
 
   // If every single parsed scene is empty, treat as a blocking error
-  const allEmpty = parsedScenes.every((s) => !s.prompt.trim());
+  const allEmpty = parsedScenes.every((s) => !s.prompt.trim() && !s.imagePrompt.trim());
   if (allEmpty) {
     errors.push('Found scene headings, but all scenes contained empty prompts.');
     return {

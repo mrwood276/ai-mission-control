@@ -65,21 +65,25 @@ export function detectFormatContradictions(text) {
 
 /**
  * Deterministically composes the final production prompt from project rules,
- * scene prompt, and optional continuity context.
+ * scene prompt (image or video), reference directives, and optional continuity context.
  *
  * @param {Object} params
- * @param {Object} params.scene - Scene object { id, sceneNumber, title, prompt }
+ * @param {Object} params.scene - Scene object { id, sceneNumber, title, prompt, videoPrompt?, imagePrompt?, imageAsset? }
  * @param {string} [params.globalRules=''] - Project-level Global Rules
  * @param {Object} [params.continuityContext=null] - Optional continuity context object
  * @param {boolean} [params.includeGlobalRules=true] - Whether to prepend Global Rules
  * @param {boolean} [params.includeContinuity=false] - Whether to include continuity summary
+ * @param {'video' | 'image'} [params.promptType='video'] - Target prompt type ('video' or 'image')
+ * @param {boolean} [params.includeReferenceDirective=true] - Whether to append reference image directive for video prompts
  * @returns {{
  *   composedPrompt: string,
  *   charCount: number,
  *   tokenEstimate: number,
  *   isDuplicatedRules: boolean,
  *   hasGlobalRules: boolean,
- *   hasContinuity: boolean
+ *   hasContinuity: boolean,
+ *   hasReferenceDirective: boolean,
+ *   promptType: string
  * }}
  */
 export function composeProductionPrompt({
@@ -88,6 +92,8 @@ export function composeProductionPrompt({
   continuityContext = null,
   includeGlobalRules = true,
   includeContinuity = false,
+  promptType = 'video',
+  includeReferenceDirective = true,
 }) {
   if (!scene || typeof scene !== 'object') {
     return {
@@ -97,10 +103,18 @@ export function composeProductionPrompt({
       isDuplicatedRules: false,
       hasGlobalRules: false,
       hasContinuity: false,
+      hasReferenceDirective: false,
+      promptType,
     };
   }
 
-  const rawScenePrompt = (scene.prompt || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+  const isImage = promptType === 'image';
+  const rawScenePrompt = (
+    isImage
+      ? (scene.imagePrompt || scene.prompt || '')
+      : (scene.videoPrompt || scene.prompt || '')
+  ).replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+
   const rawGlobalRules = (globalRules || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
 
   const isDuplicated = checkRulesDuplication(rawScenePrompt, rawGlobalRules);
@@ -111,6 +125,16 @@ export function composeProductionPrompt({
   const shouldApplyRules = includeGlobalRules && rawGlobalRules.length > 0 && !isDuplicated;
   if (shouldApplyRules) {
     sections.push(rawGlobalRules);
+  }
+
+  // Add reference image directive for video prompts if asset exists
+  let hasReferenceDirective = false;
+  if (!isImage && scene.imageAsset && includeReferenceDirective) {
+    const assetName = scene.imageAsset.name ? ` (${scene.imageAsset.name})` : '';
+    sections.push(
+      `[IMAGE REFERENCE: Maintain visual continuity with the reference image for Scene ${scene.sceneNumber}${assetName}. Preserve character appearance, wardrobe, environment, lighting, and palette.]`
+    );
+    hasReferenceDirective = true;
   }
 
   // Add optional continuity context
@@ -133,6 +157,8 @@ export function composeProductionPrompt({
     isDuplicatedRules: isDuplicated,
     hasGlobalRules: shouldApplyRules,
     hasContinuity: Boolean(continuitySummary),
+    hasReferenceDirective,
+    promptType,
   };
 }
 
@@ -144,6 +170,7 @@ export function composeProductionPrompt({
  * @param {string} params.composedPrompt - Final composed prompt
  * @param {string} [params.globalRules=''] - Global rules
  * @param {Object} [params.project=null] - Active project
+ * @param {'video' | 'image'} [params.promptType='video'] - Target prompt type
  * @returns {{
  *   status: 'passed' | 'warning' | 'failed',
  *   passed: boolean,
@@ -157,6 +184,7 @@ export function evaluatePromptQuality({
   composedPrompt,
   globalRules = '',
   _project = null,
+  promptType = 'video',
 }) {
   const errors = [];
   const warnings = [];
@@ -174,15 +202,19 @@ export function evaluatePromptQuality({
   }
 
   // Check 2: Prompt content not empty
-  const rawScenePrompt = scene?.prompt?.trim() || '';
+  const rawScenePrompt = (
+    promptType === 'image'
+      ? (scene?.imagePrompt !== undefined ? scene.imagePrompt : (scene?.prompt || ''))
+      : (scene?.videoPrompt !== undefined ? scene.videoPrompt : (scene?.prompt || ''))
+  ).trim();
   const hasSceneContent = rawScenePrompt.length > 0;
   checks.push({
-    name: 'Scene Prompt Content',
+    name: `${promptType === 'image' ? 'Image' : 'Video'} Prompt Content`,
     passed: hasSceneContent,
-    message: hasSceneContent ? `Prompt contains ${rawScenePrompt.length} characters.` : 'Scene prompt is completely empty.',
+    message: hasSceneContent ? `Prompt contains ${rawScenePrompt.length} characters.` : `${promptType === 'image' ? 'Image' : 'Scene'} prompt is completely empty.`,
   });
   if (!hasSceneContent) {
-    errors.push('Scene prompt text is empty.');
+    errors.push(`${promptType === 'image' ? 'Image' : 'Scene'} prompt text is empty.`);
   }
 
   // Check 3: Composed prompt presence
