@@ -2,8 +2,7 @@ import React, { useState } from 'react';
 import TopNav from './components/TopNav';
 import StatusBar from './components/StatusBar';
 import WebviewWrapper from './components/WebviewWrapper';
-import HandoffPanel from './components/HandoffPanel';
-import SceneManagerPanel from './components/SceneManagerPanel';
+import PipelineSidebar from './components/PipelineSidebar';
 import { MODES, WEBVIEWS } from './constants';
 
 export default function App() {
@@ -54,7 +53,7 @@ export default function App() {
         if (elementId === WEBVIEWS.CLAUDE.id) {
           return { visible: true, className: 'w-[45%] flex', order: 1 };
         }
-        if (elementId === 'handoff') {
+        if (elementId === 'sidebar') {
           return { visible: true, className: 'flex', order: 2 };
         }
         if (elementId === WEBVIEWS.CHATGPT.id) {
@@ -63,8 +62,8 @@ export default function App() {
         return { visible: false, className: 'hidden', order: 99 };
 
       case MODES.VISUAL_STUDIO:
-        if (elementId === 'sceneManager') {
-          return { visible: true, className: 'w-[25%] min-w-[280px] max-w-[380px] flex', order: 1 };
+        if (elementId === 'sidebar') {
+          return { visible: true, className: 'w-[25%] min-w-[300px] max-w-[400px] flex', order: 1 };
         }
         if (elementId === WEBVIEWS.GEMINI.id) {
           return { visible: true, className: 'flex-1 flex', order: 2 };
@@ -84,8 +83,7 @@ export default function App() {
   const chatgptLayout = getElementLayout(WEBVIEWS.CHATGPT.id);
   const geminiLayout = getElementLayout(WEBVIEWS.GEMINI.id);
   const flowLayout = getElementLayout(WEBVIEWS.GOOGLE_FLOW.id);
-  const handoffLayout = getElementLayout('handoff');
-  const sceneManagerLayout = getElementLayout('sceneManager');
+  const sidebarLayout = getElementLayout('sidebar');
 
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-slate-950 text-slate-100 select-none">
@@ -121,10 +119,13 @@ export default function App() {
           orderStyle={{ order: claudeLayout.order }}
         />
 
-        {/* Mode 2: Center Handoff & Parser Panel */}
-        <HandoffPanel
-          className={handoffLayout.className}
-          orderStyle={{ order: handoffLayout.order }}
+        {/* Persistent Pipeline Sidebar (Visible in Mode 2 & Mode 3) */}
+        <PipelineSidebar
+          activeMode={activeMode}
+          geminiCounter={geminiCounter}
+          setGeminiCounter={setGeminiCounter}
+          className={sidebarLayout.className}
+          orderStyle={{ order: sidebarLayout.order }}
         />
 
         {/* 3. ChatGPT Webview */}
@@ -136,12 +137,6 @@ export default function App() {
           badgeColor={WEBVIEWS.CHATGPT.badgeColor}
           className={chatgptLayout.className}
           orderStyle={{ order: chatgptLayout.order }}
-        />
-
-        {/* Mode 3: Scene Cards Manager Left Sidebar */}
-        <SceneManagerPanel
-          className={sceneManagerLayout.className}
-          orderStyle={{ order: sceneManagerLayout.order }}
         />
 
         {/* 4. Gemini Webview */}
