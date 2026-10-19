@@ -18,10 +18,6 @@ const PARTITION_NAME = 'persist:clean_chrome_v3';
 const stealthPreloadPath = path.join(__dirname, 'preload-stealth.js');
 const stealthPreloadUrl = pathToFileURL(stealthPreloadPath).href;
 
-ipcMain.on('get-stealth-preload-url', (event) => {
-  event.returnValue = stealthPreloadUrl;
-});
-
 app.userAgentFallback = CLEAN_USER_AGENT;
 
 function setupSession() {
@@ -95,36 +91,10 @@ function setupSession() {
   });
 }
 
-function createWindow() {
-  const mainWindow = new BrowserWindow({
-    width: 1600,
-    height: 960,
-    minWidth: 1200,
-    minHeight: 700,
-    backgroundColor: '#090d16',
-    title: 'Creator AI Command Center',
-    autoHideMenuBar: true,
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      webviewTag: true,
-      preload: path.join(__dirname, 'preload.js'),
-    },
+function setupIpcHandlers() {
+  ipcMain.on('get-stealth-preload-url', (event) => {
+    event.returnValue = stealthPreloadUrl;
   });
-
-  const isDev = process.argv.includes('--dev') || process.env.NODE_ENV === 'development';
-
-  if (isDev) {
-    const devUrl = 'http://localhost:5173';
-    mainWindow.loadURL(devUrl);
-  } else {
-    const distPath = path.join(__dirname, '../dist/index.html');
-    if (fs.existsSync(distPath)) {
-      mainWindow.loadFile(distPath);
-    } else {
-      mainWindow.loadURL('http://localhost:5173');
-    }
-  }
 
   // Standalone Google Auth Popup with sandbox: true & partition persist:clean_chrome_v3
   ipcMain.handle('open-google-login', async () => {
@@ -350,13 +320,49 @@ function createWindow() {
     }
   });
 
-  ipcMain.on('app:reload', () => {
-    mainWindow.reload();
+  ipcMain.on('app:reload', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win) {
+      win.reload();
+    }
   });
+}
+
+function createWindow() {
+  const mainWindow = new BrowserWindow({
+    width: 1600,
+    height: 960,
+    minWidth: 1200,
+    minHeight: 700,
+    backgroundColor: '#090d16',
+    title: 'Creator AI Command Center',
+    autoHideMenuBar: true,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      webviewTag: true,
+      preload: path.join(__dirname, 'preload.js'),
+    },
+  });
+
+  const isDev = process.argv.includes('--dev') || process.env.NODE_ENV === 'development';
+
+  if (isDev) {
+    const devUrl = 'http://localhost:5173';
+    mainWindow.loadURL(devUrl);
+  } else {
+    const distPath = path.join(__dirname, '../dist/index.html');
+    if (fs.existsSync(distPath)) {
+      mainWindow.loadFile(distPath);
+    } else {
+      mainWindow.loadURL('http://localhost:5173');
+    }
+  }
 }
 
 app.whenReady().then(() => {
   setupSession();
+  setupIpcHandlers();
   createWindow();
 
   app.on('activate', () => {
