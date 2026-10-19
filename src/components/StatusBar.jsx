@@ -53,40 +53,24 @@ function playChimeSound() {
   }
 }
 
-export default function StatusBar({ geminiCounter = 0, maxGemini = 4 }) {
-  // Claude message counter & cooldown
-  const [claudeCount, setClaudeCount] = useState(() => {
+export default function StatusBar({ geminiCounter = 0, setGeminiCounter, maxGemini = 4 }) {
+  const safeParseInt = (key, fallback = 0) => {
     try {
-      return parseInt(localStorage.getItem('aimc_claude_msg_count') || '0', 10);
-    } catch (e) {
-      return 0;
+      const raw = localStorage.getItem(key);
+      const parsed = parseInt(raw, 10);
+      return isNaN(parsed) || parsed < 0 ? fallback : parsed;
+    } catch {
+      return fallback;
     }
-  });
+  };
 
-  const [claudeCooldownEnd, setClaudeCooldownEnd] = useState(() => {
-    try {
-      return parseInt(localStorage.getItem('aimc_claude_cooldown_end') || '0', 10);
-    } catch (e) {
-      return 0;
-    }
-  });
+  // Claude message counter & cooldown
+  const [claudeCount, setClaudeCount] = useState(() => safeParseInt('aimc_claude_msg_count', 0));
+  const [claudeCooldownEnd, setClaudeCooldownEnd] = useState(() => safeParseInt('aimc_claude_cooldown_end', 0));
 
   // ChatGPT message counter & cooldown
-  const [chatgptCount, setChatgptCount] = useState(() => {
-    try {
-      return parseInt(localStorage.getItem('aimc_chatgpt_msg_count') || '0', 10);
-    } catch (e) {
-      return 0;
-    }
-  });
-
-  const [chatgptCooldownEnd, setChatgptCooldownEnd] = useState(() => {
-    try {
-      return parseInt(localStorage.getItem('aimc_chatgpt_cooldown_end') || '0', 10);
-    } catch (e) {
-      return 0;
-    }
-  });
+  const [chatgptCount, setChatgptCount] = useState(() => safeParseInt('aimc_chatgpt_msg_count', 0));
+  const [chatgptCooldownEnd, setChatgptCooldownEnd] = useState(() => safeParseInt('aimc_chatgpt_cooldown_end', 0));
 
   // Cooldown modal state
   const [timerModal, setTimerModal] = useState({
@@ -321,10 +305,24 @@ export default function StatusBar({ geminiCounter = 0, maxGemini = 4 }) {
           {/* Gemini Session Load (X/4) */}
           <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-slate-900/90 border border-slate-800 text-[11px]">
             <Flame className={`w-3.5 h-3.5 ${geminiCounter >= maxGemini ? 'text-rose-400 animate-pulse' : 'text-sky-400'}`} />
-            <span className="text-slate-300 font-medium">Gemini Load:</span>
-            <span className={`font-semibold ${geminiCounter >= maxGemini ? 'text-rose-400 animate-pulse' : 'text-sky-400'}`}>
-              {geminiCounter}/{maxGemini} Prompts
+            <span
+              className="text-slate-300 font-medium cursor-help"
+              title="Estimated local session prompt load. Recommends starting fresh every 4 prompts to maintain prompt adherence. Not an official Google API quota."
+            >
+              Gemini Session (Est.):
             </span>
+            <span className={`font-semibold ${geminiCounter >= maxGemini ? 'text-rose-400 animate-pulse' : 'text-sky-400'}`}>
+              {geminiCounter}/{maxGemini}
+            </span>
+            {geminiCounter > 0 && setGeminiCounter && (
+              <button
+                onClick={() => setGeminiCounter(0)}
+                className="p-0.5 hover:bg-slate-800 text-slate-500 hover:text-slate-300 rounded transition"
+                title="Reset local session prompt tracker to 0"
+              >
+                <RotateCcw className="w-2.5 h-2.5" />
+              </button>
+            )}
             {geminiCounter >= maxGemini && (
               <span className="text-[10px] bg-rose-950/80 text-rose-300 px-1.5 py-0.2 rounded border border-rose-800 font-bold animate-pulse">
                 Fresh Chat Recommended

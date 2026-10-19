@@ -2,14 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { 
   Pin, 
   Layers, 
-  Send, 
   Plus, 
   Trash2, 
   CheckCircle2, 
   Sparkles, 
   Copy, 
-  ChevronLeft, 
-  ChevronRight, 
   FileText, 
   RefreshCw, 
   Flame, 
@@ -18,10 +15,14 @@ import {
   X, 
   ClipboardPaste,
   ArrowRight,
-  ListFilter
+  ListFilter,
+  RotateCcw,
+  AlertCircle,
+  HelpCircle
 } from 'lucide-react';
 import { MODES, WEBVIEWS } from '../constants';
-import { injectTextToWebview, injectFreshGemini } from '../utils/webviewInjection';
+import { injectTextToWebview, injectFreshGemini, DELIVERY_STATUS } from '../utils/webviewInjection';
+import { parsePromptText } from '../utils/sceneParser';
 
 const STORAGE_KEYS = {
   GLOBAL_RULES: 'aimc_global_rules',
@@ -67,15 +68,16 @@ export default function PipelineSidebar({
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.SIDEBAR_COLLAPSED);
       return saved !== null ? JSON.parse(saved) : false;
-    } catch (e) {
+    } catch {
       return false;
     }
   });
 
   const [globalRules, setGlobalRules] = useState(() => {
     try {
-      return localStorage.getItem(STORAGE_KEYS.GLOBAL_RULES) || DEFAULT_GLOBAL_RULES;
-    } catch (e) {
+      const raw = localStorage.getItem(STORAGE_KEYS.GLOBAL_RULES);
+      return typeof raw === 'string' && raw.trim() ? raw : DEFAULT_GLOBAL_RULES;
+    } catch {
       return DEFAULT_GLOBAL_RULES;
     }
   });
@@ -83,14 +85,23 @@ export default function PipelineSidebar({
   const [scenes, setScenes] = useState(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.SCENE_CARDS);
-      return saved ? JSON.parse(saved) : DEFAULT_SCENES;
-    } catch (e) {
+      if (!saved) return DEFAULT_SCENES;
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const valid = parsed.filter(
+          (s) => s && typeof s === 'object' && typeof s.id === 'string' && typeof s.prompt === 'string'
+        );
+        return valid.length > 0 ? valid : DEFAULT_SCENES;
+      }
+      return DEFAULT_SCENES;
+    } catch {
       return DEFAULT_SCENES;
     }
   });
 
   const [isParserOpen, setIsParserOpen] = useState(false);
   const [rawInputText, setRawInputText] = useState('');
+  const [parsedPreview, setParsedPreview] = useState(null); // Holds { scenes, globalRules, warnings } when previewing
   const [toastMessage, setToastMessage] = useState(null);
   const [editingCardId, setEditingCardId] = useState(null);
   const [filterDone, setFilterDone] = useState('all'); // 'all', 'pending', 'completed'
@@ -99,27 +110,27 @@ export default function PipelineSidebar({
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEYS.GLOBAL_RULES, globalRules);
-    } catch (e) {}
+    } catch {}
   }, [globalRules]);
 
   // Persist Scene Cards
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEYS.SCENE_CARDS, JSON.stringify(scenes));
-    } catch (e) {}
+    } catch {}
   }, [scenes]);
 
   // Persist Collapsed State
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEYS.SIDEBAR_COLLAPSED, JSON.stringify(collapsed));
-    } catch (e) {}
+    } catch {}
   }, [collapsed]);
 
   // Auto-dismiss toast
   useEffect(() => {
     if (toastMessage) {
-      const timer = setTimeout(() => setToastMessage(null), 3000);
+      const timer = setTimeout(() => setToastMessage(null), 3500);
       return () => clearTimeout(timer);
     }
   }, [toastMessage]);
@@ -128,87 +139,44 @@ export default function PipelineSidebar({
     setToastMessage({ message, type });
   };
 
-  // Parsing logic for ChatGPT raw text
+  // Parsing raw text from ChatGPT / AI
   const handleParseRawText = () => {
     if (!rawInputText.trim()) {
-      showToast('Paste teks output ChatGPT terlebih dahulu.', 'warning');
+      showToast('Paste AI storyboard output before parsing.', 'warning');
       return;
     }
 
-    const text = rawInputText.trim();
-    let extractedRules = null;
-    const parsedScenes = [];
-
-    // 1. Detect Global Rules section if present before scenes
-    const globalRulesMatch = text.match(
-      /(?:^|\n)(?:#{1,4}\s*)?(?:\*\*)?(?:1\.\s*)?(?:Global Rules|GLOBAL RULES|Global Visual Rules|Global Settings)[:\s\-–—]*(.*?)(?=(?:\n(?:#{1,4}\s*)?(?:\*\*)?(?:2\.\s*)?(?:Scene|SCENE)\s*\d+)|$)/is
-    );
-
-    if (globalRulesMatch && globalRulesMatch[1]) {
-      const cleanRules = globalRulesMatch[1].replace(/\*\*/g, '').trim();
-      if (cleanRules) {
-        extractedRules = cleanRules;
-      }
-    }
-
-    // 2. Detect Scene headers pattern
-    const sceneHeaderRegex = /(?:^|\n)(?:#{1,4}\s*)?(?:\*\*)?(?:2\.\s*)?(?:Scene|SCENE)\s*(\d+)[:\s\-–—]*(.*?)(?:\*\*)?(?=\n|$)/gi;
-    const matches = [];
-    let match;
-
-    while ((match = sceneHeaderRegex.exec(text)) !== null) {
-      matches.push({
-        index: match.index,
-        fullLength: match[0].length,
-        sceneNumber: match[1],
-        rawTitle: match[2] || '',
-      });
-    }
-
-    if (matches.length === 0) {
-      showToast('Tidak ditemukan pola Scene (Scene 1, Scene 2, dll).', 'error');
+    const result = parsePromptText(rawInputText);
+    if (!result.success || result.scenes.length === 0) {
+      const errorMsg = result.errors.length > 0 ? result.errors.join(' ') : 'No valid scenes found.';
+      showToast(`Parsing failed: ${errorMsg}`, 'error');
       return;
     }
 
-    for (let i = 0; i < matches.length; i++) {
-      const current = matches[i];
-      const startIndex = current.index + current.fullLength;
-      const endIndex = i + 1 < matches.length ? matches[i + 1].index : text.length;
+    // Show preview confirmation before modifying project
+    setParsedPreview(result);
+  };
 
-      let sceneBody = text.slice(startIndex, endIndex).trim();
-      // Remove trailing divider dashes like ---
-      sceneBody = sceneBody.replace(/\n\s*---+\s*$/g, '').trim();
+  // Confirm replacement after reviewing preview
+  const handleConfirmImport = () => {
+    if (!parsedPreview || parsedPreview.scenes.length === 0) return;
 
-      let cleanedTitle = current.rawTitle
-        .replace(/\*\*/g, '')
-        .replace(/__/g, '')
-        .trim();
-      cleanedTitle = cleanedTitle.replace(/^[:\-–—\s]+/, '').trim();
-
-      const finalTitle = cleanedTitle
-        ? `Scene ${current.sceneNumber}: ${cleanedTitle}`
-        : `Scene ${current.sceneNumber}`;
-
-      parsedScenes.push({
-        id: `scene-${Date.now()}-${i + 1}`,
-        sceneNumber: parseInt(current.sceneNumber, 10),
-        title: finalTitle,
-        prompt: sceneBody,
-        done: false,
-      });
+    if (parsedPreview.globalRules) {
+      setGlobalRules(parsedPreview.globalRules);
     }
 
-    if (extractedRules) {
-      setGlobalRules(extractedRules);
-    }
-
-    setScenes(parsedScenes);
+    setScenes(parsedPreview.scenes);
+    setParsedPreview(null);
     setIsParserOpen(false);
     setRawInputText('');
     showToast(
-      `Berhasil mem-parse ${parsedScenes.length} Scene Cards${extractedRules ? ' & Global Rules' : ''}!`,
+      `✓ Imported ${parsedPreview.scenes.length} Scene Cards${parsedPreview.globalRules ? ' & updated Global Rules' : ''}!`,
       'success'
     );
+  };
+
+  const handleCancelPreview = () => {
+    setParsedPreview(null);
   };
 
   // Quick Copy Storyboard Prompt Wrapper for Mode 2
@@ -216,7 +184,9 @@ export default function PipelineSidebar({
     try {
       let clipboardText = '';
       try {
-        clipboardText = await navigator.clipboard.readText();
+        if (navigator?.clipboard?.readText) {
+          clipboardText = await navigator.clipboard.readText();
+        }
       } catch (e) {
         console.warn('Clipboard read failed:', e);
       }
@@ -243,27 +213,40 @@ Scene 2: [Short Title]
 --- STORYBOARD INPUT ---
 ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD SCRIPT HERE]'}`;
 
-      await navigator.clipboard.writeText(promptWrapper);
-      showToast('✓ Storyboard Prompt Wrapper disalin! Siap dipaste ke ChatGPT.', 'success');
-    } catch (err) {
-      showToast('Gagal menyalin wrapper ke clipboard.', 'error');
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(promptWrapper);
+        showToast('✓ Storyboard Prompt Wrapper copied! Paste it into ChatGPT.', 'success');
+      } else {
+        showToast('Clipboard write is not supported in this environment.', 'warning');
+      }
+    } catch {
+      showToast('Failed to copy wrapper to clipboard.', 'error');
     }
   };
 
-  // Action Button Handlers
+  // Action Button Handlers with explicit delivery tracking
   const handleSendToGemini = async (scene) => {
     try {
-      const nextCount = Math.min((geminiCounter || 0) + 1, 4);
-      if (setGeminiCounter) {
-        setGeminiCounter(nextCount);
-      }
       const res = await injectTextToWebview(WEBVIEWS.GEMINI.id, scene.prompt);
-      showToast(
-        `▶️ Gemini: ${res.method === 'dom-injection' ? 'Disuntikkan ke input webview' : 'Disalin ke clipboard'}! (Load: ${nextCount}/4)`,
-        'success'
-      );
+
+      if (res.status === DELIVERY_STATUS.INSERTED) {
+        if (setGeminiCounter) {
+          setGeminiCounter((prev) => Math.min(prev + 1, 4));
+        }
+        showToast(
+          `▶️ Gemini: Prompt inserted into input! (Estimated session load: ${Math.min((geminiCounter || 0) + 1, 4)}/4)`,
+          'success'
+        );
+      } else if (res.status === DELIVERY_STATUS.COPIED) {
+        showToast(
+          '📋 Gemini: Prompt copied to clipboard for manual paste (Ctrl+V). Webview input not reachable.',
+          'info'
+        );
+      } else {
+        showToast(`⚠️ Gemini delivery failed: ${res.error || res.reason || 'Input unavailable'}`, 'error');
+      }
     } catch (e) {
-      showToast('Gagal menyuntikkan prompt ke Gemini.', 'error');
+      showToast('Failed to deliver prompt to Gemini.', 'error');
     }
   };
 
@@ -273,17 +256,24 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
         ? `${globalRules.trim()}\n\n${scene.prompt.trim()}`
         : scene.prompt.trim();
 
-      if (setGeminiCounter) {
-        setGeminiCounter(1);
-      }
-      showToast('🔄 Membuka fresh chat Gemini & menyuntikkan Global Rules + Scene Prompt...', 'info');
+      showToast('🔄 Initializing fresh Gemini chat session...', 'info');
       const res = await injectFreshGemini(WEBVIEWS.GEMINI.id, fullPrompt);
-      showToast(
-        `✓ Gemini Fresh: ${res.method === 'dom-injection' ? 'Input berhasil diisi' : 'Prompt siap di clipboard'}! (Load: 1/4)`,
-        'success'
-      );
-    } catch (e) {
-      showToast('Gagal memuat fresh chat Gemini.', 'error');
+
+      if (res.status === DELIVERY_STATUS.INSERTED) {
+        if (setGeminiCounter) {
+          setGeminiCounter(1);
+        }
+        showToast('✓ Gemini Fresh: Session initialized and prompt inserted (Load: 1/4)', 'success');
+      } else if (res.status === DELIVERY_STATUS.COPIED) {
+        if (setGeminiCounter) {
+          setGeminiCounter(1);
+        }
+        showToast('📋 Gemini Fresh: Navigated. Prompt copied to clipboard for manual paste.', 'info');
+      } else {
+        showToast(`⚠️ Failed to load fresh Gemini session: ${res.error || res.reason}`, 'error');
+      }
+    } catch {
+      showToast('Failed to open fresh Gemini chat.', 'error');
     }
   };
 
@@ -294,12 +284,16 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
         : scene.prompt.trim();
 
       const res = await injectTextToWebview(WEBVIEWS.GOOGLE_FLOW.id, flowPrompt);
-      showToast(
-        `🎬 Flow: ${res.method === 'dom-injection' ? 'Disuntikkan ke Google Flow' : 'Disalin ke clipboard'}!`,
-        'success'
-      );
-    } catch (e) {
-      showToast('Gagal menyuntikkan prompt ke Flow.', 'error');
+
+      if (res.status === DELIVERY_STATUS.INSERTED) {
+        showToast('🎬 Flow: Prompt inserted into Google Flow input!', 'success');
+      } else if (res.status === DELIVERY_STATUS.COPIED) {
+        showToast('📋 Flow: Prompt copied to clipboard for manual paste (Ctrl+V).', 'info');
+      } else {
+        showToast(`⚠️ Flow delivery failed: ${res.error || res.reason}`, 'error');
+      }
+    } catch {
+      showToast('Failed to deliver prompt to Google Flow.', 'error');
     }
   };
 
@@ -323,12 +317,12 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
     };
     setScenes([...scenes, newScene]);
     setEditingCardId(newScene.id);
-    showToast(`Scene ${nextNumber} ditambahkan!`, 'info');
+    showToast(`Scene ${nextNumber} added.`, 'info');
   };
 
   const handleDeleteScene = (id) => {
     setScenes((prev) => prev.filter((s) => s.id !== id));
-    showToast('Scene Card dihapus.', 'info');
+    showToast('Scene Card deleted.', 'info');
   };
 
   const handleUpdateScene = (id, field, value) => {
@@ -394,307 +388,271 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
         <div className="flex items-center gap-1.5">
           {!collapsed && (
             <>
-              {/* Gemini Load: X/4 Badge */}
+              {/* Gemini Session Load Badge with Reset Action */}
               <div
                 className={`px-1.5 py-0.5 rounded text-[10px] font-mono flex items-center gap-1 border transition-all ${
                   geminiCounter >= 4
-                    ? 'bg-rose-950/90 border-rose-500 text-rose-300 animate-pulse font-bold ring-1 ring-rose-500/50'
+                    ? 'bg-rose-950/80 text-rose-300 border-rose-700/80'
                     : geminiCounter >= 3
-                    ? 'bg-amber-950/80 border-amber-500 text-amber-300 font-semibold'
-                    : 'bg-slate-800 border-slate-700 text-slate-300'
+                    ? 'bg-amber-950/80 text-amber-300 border-amber-700/80'
+                    : 'bg-slate-800 text-slate-300 border-slate-700'
                 }`}
-                title="Gemini Session Load (Max 4 scenes before context reset recommended)"
+                title={`Estimated Gemini Session Load: ${geminiCounter}/4. Recommends starting a fresh session every 4 prompts to maintain prompt adherence.`}
               >
-                <span>Gemini:</span>
-                <span>{geminiCounter || 0}/4</span>
-                {geminiCounter >= 4 && <span className="text-[10px] text-rose-400">⚠️</span>}
+                <Flame className={`w-3 h-3 ${geminiCounter >= 4 ? 'text-rose-400 animate-bounce' : 'text-sky-400'}`} />
+                <span>Gemini: {geminiCounter}/4</span>
+                <button
+                  onClick={() => {
+                    if (setGeminiCounter) setGeminiCounter(0);
+                    showToast('Gemini session prompt counter reset to 0/4', 'info');
+                  }}
+                  className="ml-0.5 p-0.5 rounded hover:bg-white/20 text-slate-400 hover:text-white transition"
+                  title="Reset Gemini session prompt tracker to 0"
+                >
+                  <RotateCcw className="w-2.5 h-2.5" />
+                </button>
               </div>
 
+              {/* Parser Trigger Button */}
               <button
-                onClick={() => setIsParserOpen(true)}
-                className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-purple-300 hover:text-white text-[11px] flex items-center gap-1 transition"
-                title="Open Raw AI Output Parser"
+                onClick={() => {
+                  setParsedPreview(null);
+                  setIsParserOpen(true);
+                }}
+                className="p-1 rounded bg-purple-600/30 hover:bg-purple-600 text-purple-300 hover:text-white border border-purple-500/40 transition"
+                title="Paste raw ChatGPT output to parse into Scene Cards"
               >
-                <ClipboardPaste className="w-3 h-3 text-purple-400" />
-                <span>Parser</span>
+                <ClipboardPaste className="w-3.5 h-3.5" />
               </button>
             </>
           )}
-
-          <button
-            onClick={() => setCollapsed(!collapsed)}
-            className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition"
-            title={collapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
-          >
-            {collapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronLeft className="w-3.5 h-3.5" />}
-          </button>
         </div>
       </div>
 
-      {/* Collapsed Vertical Indicator */}
-      {collapsed ? (
-        <div className="flex-1 flex flex-col items-center py-3 gap-4 text-slate-400">
-          <button
-            onClick={() => setCollapsed(false)}
-            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-purple-400"
-            title="Expand Sidebar"
-          >
-            <Layers className="w-4 h-4" />
-          </button>
-
-          <button
-            onClick={() => {
-              setCollapsed(false);
-              setIsParserOpen(true);
-            }}
-            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-400"
-            title="Open Raw Parser"
-          >
-            <ClipboardPaste className="w-4 h-4" />
-          </button>
-
-          <div className="w-5 h-5 rounded-full bg-purple-950/80 border border-purple-700 flex items-center justify-center text-[10px] font-bold text-purple-300">
-            {scenes.length}
-          </div>
-
-          <span className="[writing-mode:vertical-rl] rotate-180 text-[10px] tracking-widest uppercase font-semibold text-slate-500">
-            Pipeline Sidebar
-          </span>
-        </div>
-      ) : (
-        /* Expanded Content */
-        <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-3 text-xs">
-          
-          {/* Mode 2 Special Helper: Copy Storyboard Prompt Wrapper */}
+      {/* Main Sidebar Content Area */}
+      {!collapsed && (
+        <div className="flex-1 flex flex-col overflow-hidden text-xs">
+          {/* Quick Handoff Banner in Mode 2 */}
           {activeMode === MODES.PROMPT_ENGINEERING && (
-            <div className="p-2.5 rounded-xl bg-gradient-to-r from-emerald-950/40 to-slate-900 border border-emerald-500/30 shadow-sm flex flex-col gap-2">
+            <div className="p-2.5 bg-gradient-to-r from-purple-950/40 to-slate-900 border-b border-purple-800/30 flex flex-col gap-2 flex-shrink-0">
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-emerald-400 flex items-center gap-1">
-                  <Sparkles className="w-3.5 h-3.5" />
-                  Mode 2: Prompt Bridge
+                <span className="font-semibold text-purple-300 text-[11px] flex items-center gap-1">
+                  <Sparkles className="w-3 h-3" />
+                  Mode 2: Prompt Handoff
                 </span>
-                <span className="text-[10px] bg-emerald-950 text-emerald-300 px-1.5 py-0.5 rounded border border-emerald-800 font-mono">
-                  Claude → ChatGPT
-                </span>
+                <span className="text-[10px] text-slate-400">Claude → ChatGPT</span>
               </div>
-              <p className="text-[11px] text-slate-400 leading-relaxed">
-                Copy storyboard dari Claude (kiri), lalu klik tombol di bawah untuk membungkusnya dengan instruksi ChatGPT:
+              <p className="text-[10px] text-slate-400 leading-tight">
+                Copy Claude storyboard, wrap with Director rules, and send to ChatGPT:
               </p>
               <button
                 onClick={handleCopyStoryboardWrapper}
-                className="w-full py-1.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs flex items-center justify-center gap-2 shadow-md shadow-emerald-950 transition active:scale-95"
-                title="Wraps clipboard with ChatGPT instruction to generate Global Rules & Scene Prompts"
+                className="w-full py-1.5 px-2 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-medium text-[11px] flex items-center justify-center gap-1.5 transition shadow-sm"
               >
-                <Copy className="w-3.5 h-3.5" />
-                <span>Copy Storyboard Prompt Wrapper</span>
+                <Copy className="w-3 h-3" />
+                <span>Copy Storyboard Wrapper</span>
               </button>
             </div>
           )}
 
-          {/* Pinned Global Rules Text Box */}
-          <div className="p-2.5 rounded-xl bg-slate-950/90 border border-purple-500/30 shadow-sm flex flex-col gap-1.5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5 font-bold text-purple-400 text-[11px]">
-                <Pin className="w-3 h-3 text-purple-400" />
-                <span>Pinned Global Rules</span>
+          {/* Section 1: Pinned Global Rules Card */}
+          <div className="p-2.5 border-b border-slate-800 bg-slate-950/60 flex-shrink-0">
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="flex items-center gap-1.5 font-semibold text-slate-200">
+                <Pin className="w-3.5 h-3.5 text-amber-400 fill-amber-400/20" />
+                <span className="tracking-wide">Global Visual Rules</span>
               </div>
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={async () => {
-                    await navigator.clipboard.writeText(globalRules);
-                    showToast('Global Rules disalin ke clipboard!', 'info');
-                  }}
-                  className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition"
-                  title="Copy Global Rules"
-                >
-                  <Copy className="w-3 h-3" />
-                </button>
-                <span className="text-[9px] bg-purple-950/80 text-purple-300 px-1.5 py-0.5 rounded border border-purple-800/80 font-mono">
-                  Saved
-                </span>
-              </div>
+              <span className="text-[10px] text-amber-400/80 font-mono">Pinned</span>
             </div>
-
             <textarea
               value={globalRules}
               onChange={(e) => setGlobalRules(e.target.value)}
-              placeholder="Contoh: Aspect Ratio 16:9, Unreal Engine 5.4 cinematic lighting, octane render, 8k..."
-              rows={2}
-              className="w-full bg-slate-900/80 border border-slate-800 rounded-lg p-2 text-slate-200 font-mono text-[11px] resize-y focus:outline-none focus:border-purple-500/50"
+              placeholder="e.g. Aspect Ratio 16:9, Unreal Engine 5 lighting, 8k render..."
+              rows={3}
+              className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-slate-300 text-[11px] resize-none focus:outline-none focus:border-amber-500/50 transition font-mono leading-relaxed"
             />
           </div>
 
-          {/* Scene Cards List Header */}
-          <div className="flex items-center justify-between pt-1">
-            <div className="flex items-center gap-1.5">
-              <span className="font-semibold text-slate-200 text-xs">
-                Scene Cards ({scenes.length})
-              </span>
-              <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded font-mono">
-                {completedCount}/{scenes.length} Done
-              </span>
+          {/* Section 2: Scene Cards List Filter Bar */}
+          <div className="h-8 px-2.5 bg-slate-900/60 border-b border-slate-800 flex items-center justify-between flex-shrink-0 select-none">
+            <div className="flex items-center gap-1.5 font-medium text-slate-300 text-[11px]">
+              <FileText className="w-3 h-3 text-sky-400" />
+              <span>Scene Cards ({completedCount}/{scenes.length})</span>
             </div>
 
             <div className="flex items-center gap-1">
+              {/* Filter Completed / Pending */}
+              <div className="flex items-center bg-slate-950 rounded border border-slate-800 p-0.5 text-[10px]">
+                <button
+                  onClick={() => setFilterDone('all')}
+                  className={`px-1.5 py-0.5 rounded ${filterDone === 'all' ? 'bg-slate-800 text-white font-medium' : 'text-slate-400 hover:text-slate-200'}`}
+                >
+                  All
+                </button>
+                <button
+                  onClick={() => setFilterDone('pending')}
+                  className={`px-1.5 py-0.5 rounded ${filterDone === 'pending' ? 'bg-slate-800 text-white font-medium' : 'text-slate-400 hover:text-slate-200'}`}
+                >
+                  Todo
+                </button>
+                <button
+                  onClick={() => setFilterDone('completed')}
+                  className={`px-1.5 py-0.5 rounded ${filterDone === 'completed' ? 'bg-slate-800 text-white font-medium' : 'text-slate-400 hover:text-slate-200'}`}
+                >
+                  Done
+                </button>
+              </div>
+
+              {/* Add New Scene Button */}
               <button
                 onClick={handleAddScene}
-                className="flex items-center gap-1 px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] transition"
-                title="Tambah Scene Card baru"
+                className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition"
+                title="Add a new blank Scene Card"
               >
-                <Plus className="w-3 h-3 text-purple-400" />
-                <span>Add</span>
+                <Plus className="w-3 h-3" />
               </button>
             </div>
           </div>
 
-          {/* Filter Bar */}
-          <div className="flex items-center gap-1 bg-slate-950/60 p-1 rounded-lg border border-slate-800/60 text-[10px]">
-            <span className="text-slate-500 px-1 flex items-center gap-1">
-              <ListFilter className="w-3 h-3" />
-            </span>
-            <button
-              onClick={() => setFilterDone('all')}
-              className={`flex-1 py-0.5 rounded transition ${
-                filterDone === 'all' ? 'bg-slate-800 text-white font-medium' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              All ({scenes.length})
-            </button>
-            <button
-              onClick={() => setFilterDone('pending')}
-              className={`flex-1 py-0.5 rounded transition ${
-                filterDone === 'pending' ? 'bg-slate-800 text-sky-400 font-medium' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              Pending ({scenes.length - completedCount})
-            </button>
-            <button
-              onClick={() => setFilterDone('completed')}
-              className={`flex-1 py-0.5 rounded transition ${
-                filterDone === 'completed' ? 'bg-slate-800 text-emerald-400 font-medium' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              Done ({completedCount})
-            </button>
-          </div>
-
-          {/* Scene Cards List */}
-          <div className="flex flex-col gap-2.5">
+          {/* Section 3: Scrollable Scene Cards List */}
+          <div className="flex-1 overflow-y-auto p-2 space-y-2">
             {filteredScenes.length === 0 ? (
-              <div className="p-4 text-center rounded-xl bg-slate-950/40 border border-slate-800/50 text-slate-500">
-                <p className="text-xs">Tidak ada Scene Card.</p>
-                <p className="text-[10px] text-slate-600 mt-1">
-                  Gunakan tombol <b>Parser</b> untuk mengekstrak output ChatGPT atau klik <b>Add</b>.
-                </p>
+              <div className="p-6 text-center text-slate-500 text-xs flex flex-col items-center gap-2">
+                <FileText className="w-6 h-6 text-slate-600" />
+                <span>No scene cards found matching filter.</span>
+                <button
+                  onClick={() => {
+                    setParsedPreview(null);
+                    setIsParserOpen(true);
+                  }}
+                  className="mt-1 px-3 py-1 rounded bg-purple-600/30 hover:bg-purple-600/50 text-purple-300 text-[11px] transition"
+                >
+                  Parse Storyboard
+                </button>
               </div>
             ) : (
               filteredScenes.map((scene) => {
                 const isEditing = editingCardId === scene.id;
+                const isGeminiFull = (geminiCounter || 0) >= 4;
 
                 return (
                   <div
                     key={scene.id}
                     className={`rounded-xl border transition-all duration-150 p-2.5 flex flex-col gap-2 ${
                       scene.done
-                        ? 'bg-slate-950/40 border-slate-900 opacity-60'
-                        : 'bg-slate-950/80 border-slate-800/90 hover:border-slate-700 shadow-sm'
+                        ? 'bg-slate-950/40 border-slate-800/60 opacity-70'
+                        : 'bg-slate-950 border-slate-800/90 shadow-sm hover:border-slate-700'
                     }`}
                   >
-                    {/* Card Header */}
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 overflow-hidden flex-1">
-                        {/* Completed Checkbox */}
-                        <input
-                          type="checkbox"
-                          checked={scene.done}
-                          onChange={() => handleToggleDone(scene.id)}
-                          className="w-3.5 h-3.5 rounded border-slate-700 bg-slate-900 text-purple-600 focus:ring-0 focus:ring-offset-0 cursor-pointer"
-                          title="Tandai sebagai selesai / rendered"
-                        />
+                    {/* Scene Header */}
+                    <div className="flex items-center justify-between gap-1.5">
+                      <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                        <button
+                          onClick={() => handleToggleDone(scene.id)}
+                          className={`flex-shrink-0 transition ${
+                            scene.done
+                              ? 'text-emerald-400 hover:text-emerald-300'
+                              : 'text-slate-600 hover:text-slate-400'
+                          }`}
+                          title={scene.done ? 'Mark as Pending' : 'Mark as Done'}
+                        >
+                          <CheckCircle2 className="w-4 h-4" />
+                        </button>
 
-                        {/* Title Display or Edit */}
                         {isEditing ? (
                           <input
                             type="text"
                             value={scene.title}
-                            onChange={(e) => handleUpdateScene(scene.id, 'title', e.target.value)}
-                            className="flex-1 bg-slate-900 border border-purple-500/50 rounded px-1.5 py-0.5 text-xs text-slate-100 focus:outline-none"
+                            onChange={(e) =>
+                              handleUpdateScene(scene.id, 'title', e.target.value)
+                            }
+                            className="flex-1 bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-xs text-slate-200 font-semibold focus:outline-none"
                           />
                         ) : (
                           <span
                             className={`font-semibold text-xs truncate ${
-                              scene.done ? 'line-through text-slate-500' : 'text-slate-200'
+                              scene.done
+                                ? 'line-through text-slate-500'
+                                : 'text-slate-200'
                             }`}
-                            title={scene.title}
                           >
                             {scene.title}
                           </span>
                         )}
                       </div>
 
-                      {/* Header Actions */}
+                      {/* Card Tools */}
                       <div className="flex items-center gap-1 flex-shrink-0">
                         <button
-                          onClick={() => setEditingCardId(isEditing ? null : scene.id)}
-                          className={`p-1 rounded transition ${
-                            isEditing ? 'bg-purple-600 text-white' : 'hover:bg-slate-800 text-slate-400 hover:text-slate-200'
-                          }`}
-                          title={isEditing ? 'Selesai edit' : 'Edit scene'}
+                          onClick={() =>
+                            setEditingCardId(isEditing ? null : scene.id)
+                          }
+                          className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition"
+                          title={isEditing ? 'Save Edit' : 'Edit Scene'}
                         >
-                          {isEditing ? <Check className="w-3 h-3" /> : <Edit3 className="w-3 h-3" />}
+                          {isEditing ? (
+                            <Check className="w-3 h-3 text-emerald-400" />
+                          ) : (
+                            <Edit3 className="w-3 h-3" />
+                          )}
                         </button>
-
                         <button
                           onClick={() => handleDeleteScene(scene.id)}
-                          className="p-1 rounded hover:bg-rose-950/60 text-slate-400 hover:text-rose-400 transition"
-                          title="Hapus Scene Card"
+                          className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-rose-400 transition"
+                          title="Delete Scene"
                         >
                           <Trash2 className="w-3 h-3" />
                         </button>
                       </div>
                     </div>
 
-                    {/* Prompt Content */}
-                    <div className="flex flex-col gap-1">
+                    {/* Scene Prompt Text */}
+                    {isEditing ? (
                       <textarea
                         value={scene.prompt}
-                        onChange={(e) => handleUpdateScene(scene.id, 'prompt', e.target.value)}
-                        rows={isEditing ? 4 : 2}
-                        placeholder="Deskripsi visual / animasi prompt scene..."
-                        className={`w-full bg-slate-900/60 border rounded-lg p-2 text-[11px] font-mono resize-y focus:outline-none ${
-                          scene.done ? 'text-slate-500 border-slate-900' : 'text-slate-300 border-slate-800 focus:border-purple-500/50'
-                        }`}
+                        onChange={(e) =>
+                          handleUpdateScene(scene.id, 'prompt', e.target.value)
+                        }
+                        rows={3}
+                        className="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-slate-300 text-[11px] font-mono resize-none focus:outline-none"
                       />
-                    </div>
+                    ) : (
+                      <p className="text-[11px] text-slate-400 font-mono leading-relaxed line-clamp-3 select-text bg-slate-900/50 p-1.5 rounded border border-slate-900">
+                        {scene.prompt}
+                      </p>
+                    )}
 
-                    {/* Action Buttons: [▶️ Gemini], [🔄 Fresh+Global], [🎬 Flow] */}
+                    {/* Action Delivery Buttons */}
                     <div className="flex items-center gap-1.5 pt-1 border-t border-slate-900/80">
+                      {/* Button 1: Inject Scene Only to Gemini */}
                       <button
                         onClick={() => handleSendToGemini(scene)}
-                        className="flex-1 py-1 px-1.5 rounded bg-sky-600/80 hover:bg-sky-500 text-white text-[10px] font-medium flex items-center justify-center gap-1 transition shadow-sm"
-                        title="Inject scene prompt into Gemini webview (+1 to load)"
+                        className={`flex-1 py-1 px-1.5 rounded text-[10px] font-medium flex items-center justify-center gap-1 transition shadow-sm ${
+                          isGeminiFull
+                            ? 'bg-slate-800 hover:bg-slate-700 text-slate-400'
+                            : 'bg-sky-600/80 hover:bg-sky-500 text-white'
+                        }`}
+                        title="Inject scene prompt into Gemini webview input"
                       >
-                        <Send className="w-2.5 h-2.5" />
-                        <span>▶️ Gemini</span>
+                        <ArrowRight className="w-2.5 h-2.5" />
+                        <span>Inject Scene</span>
                       </button>
 
+                      {/* Button 2: Fresh Gemini + Global + Scene */}
                       <button
                         onClick={() => handleFreshGeminiGlobal(scene)}
-                        className={`flex-1 py-1 px-1.5 rounded text-white text-[10px] font-medium flex items-center justify-center gap-1 transition shadow-sm ${
-                          geminiCounter >= 4
-                            ? 'bg-orange-600 hover:bg-orange-500 ring-2 ring-orange-400 animate-pulse font-bold'
-                            : 'bg-amber-600/80 hover:bg-amber-500'
+                        className={`flex-1 py-1 px-1.5 rounded text-[10px] font-medium flex items-center justify-center gap-1 transition shadow-sm ${
+                          isGeminiFull
+                            ? 'bg-amber-600 hover:bg-amber-500 text-white font-semibold animate-pulse ring-1 ring-amber-400'
+                            : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
                         }`}
-                        title={
-                          geminiCounter >= 4
-                            ? 'Recommended: Reset Gemini context (4/4 reached) + inject Global Rules + Scene Prompt'
-                            : 'Open fresh Gemini chat + inject Global Rules + Scene Prompt (Resets load to 1/4)'
-                        }
+                        title="Open fresh Gemini chat, wait for load, and inject Global Rules + Scene Prompt together"
                       >
-                        <Flame className="w-2.5 h-2.5" />
-                        <span>🔄 Fresh+Global</span>
+                        <RefreshCw className="w-2.5 h-2.5 text-amber-300" />
+                        <span>Fresh + Global</span>
                       </button>
 
+                      {/* Button 3: Send to Google Flow */}
                       <button
                         onClick={() => handleSendToFlow(scene)}
                         className="flex-1 py-1 px-1.5 rounded bg-purple-600/80 hover:bg-purple-500 text-white text-[10px] font-medium flex items-center justify-center gap-1 transition shadow-sm"
@@ -712,7 +670,7 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
         </div>
       )}
 
-      {/* Raw Output Parser Modal */}
+      {/* Raw Output Parser Modal with Preview Confirmation */}
       {isParserOpen && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in fade-in zoom-in-95 duration-150">
@@ -724,15 +682,20 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
                 </div>
                 <div>
                   <h3 className="font-semibold text-sm text-slate-100">
-                    Raw AI Output Parser
+                    {parsedPreview ? 'Confirm Scene Import Preview' : 'Raw AI Output Parser'}
                   </h3>
                   <p className="text-[11px] text-slate-400">
-                    Paste output mentah dari ChatGPT untuk otomatis dipecah menjadi Global Rules & Scene Cards.
+                    {parsedPreview
+                      ? 'Review parsed scenes before confirming replacement of existing project.'
+                      : 'Paste raw ChatGPT storyboard to extract Global Rules and individual Scene Cards.'}
                   </p>
                 </div>
               </div>
               <button
-                onClick={() => setIsParserOpen(false)}
+                onClick={() => {
+                  setParsedPreview(null);
+                  setIsParserOpen(false);
+                }}
                 className="p-1 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition"
               >
                 <X className="w-4 h-4" />
@@ -740,30 +703,75 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
             </div>
 
             {/* Modal Body */}
-            <div className="p-5 flex-1 flex flex-col gap-3 overflow-hidden">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-medium text-slate-300">
-                  Paste ChatGPT Output:
-                </span>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    try {
-                      const text = await navigator.clipboard.readText();
-                      setRawInputText(text);
-                    } catch (e) {}
-                  }}
-                  className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-sky-400 text-[11px] transition flex items-center gap-1"
-                >
-                  <Copy className="w-3 h-3" />
-                  <span>Paste Clipboard</span>
-                </button>
-              </div>
+            {parsedPreview ? (
+              <div className="p-5 flex-1 flex flex-col gap-3 overflow-hidden text-xs">
+                <div className="p-3 rounded-xl bg-purple-950/30 border border-purple-800/40 text-purple-200 flex items-center justify-between">
+                  <span className="font-medium">
+                    ✓ Successfully parsed {parsedPreview.scenes.length} Scene Cards
+                  </span>
+                  <span className="text-[10px] text-purple-300 font-mono">
+                    {parsedPreview.globalRules ? 'Global Rules Found' : 'No Global Rules'}
+                  </span>
+                </div>
 
-              <textarea
-                value={rawInputText}
-                onChange={(e) => setRawInputText(e.target.value)}
-                placeholder={
+                {parsedPreview.globalRules && (
+                  <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800">
+                    <span className="text-[10px] text-amber-400 font-mono font-medium block mb-1">
+                      EXTRACTED GLOBAL RULES:
+                    </span>
+                    <p className="text-slate-300 font-mono text-[11px] line-clamp-2">
+                      {parsedPreview.globalRules}
+                    </p>
+                  </div>
+                )}
+
+                {/* Parsed Scenes Preview List */}
+                <div className="flex-1 overflow-y-auto space-y-2 border border-slate-800 rounded-xl p-2 bg-slate-950/40">
+                  {parsedPreview.scenes.map((s, idx) => (
+                    <div key={s.id || idx} className="p-2 rounded-lg bg-slate-900 border border-slate-800">
+                      <div className="font-semibold text-slate-200 text-xs mb-0.5">
+                        {s.title}
+                      </div>
+                      <p className="text-slate-400 font-mono text-[11px] line-clamp-2">
+                        {s.prompt}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+
+                {parsedPreview.warnings && parsedPreview.warnings.length > 0 && (
+                  <div className="p-2 rounded bg-amber-950/30 border border-amber-800/30 text-amber-300 text-[11px]">
+                    {parsedPreview.warnings.join(' ')}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="p-5 flex-1 flex flex-col gap-3 overflow-hidden">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-medium text-slate-300">
+                    Paste ChatGPT Output:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        if (navigator?.clipboard?.readText) {
+                          const text = await navigator.clipboard.readText();
+                          setRawInputText(text);
+                        }
+                      } catch {}
+                    }}
+                    className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-sky-400 text-[11px] transition flex items-center gap-1"
+                  >
+                    <Copy className="w-3 h-3" />
+                    <span>Paste Clipboard</span>
+                  </button>
+                </div>
+
+                <textarea
+                  value={rawInputText}
+                  onChange={(e) => setRawInputText(e.target.value)}
+                  placeholder={
 `Global Rules:
 Aspect Ratio 16:9, Unreal Engine 5.4 cinematic lighting, 8k render...
 
@@ -772,32 +780,55 @@ Cinematic wide shot of mission control room...
 
 Scene 2: Problem Statement
 Medium close-up of protagonist analyzing AI telemetry...`}
-                rows={12}
-                className="w-full flex-1 bg-slate-950 border border-slate-800 rounded-xl p-3 text-slate-200 font-mono text-xs resize-none focus:outline-none focus:border-purple-500/50"
-              />
-            </div>
+                  rows={12}
+                  className="w-full flex-1 bg-slate-950 border border-slate-800 rounded-xl p-3 text-slate-200 font-mono text-xs resize-none focus:outline-none focus:border-purple-500/50"
+                />
+              </div>
+            )}
 
             {/* Modal Footer */}
             <div className="px-5 py-3 bg-slate-900 border-t border-slate-800 flex items-center justify-between">
               <span className="text-[11px] text-slate-500 font-mono">
-                Mendeteksi pola: Scene 1, SCENE 1:, # Scene 1, dll.
+                {parsedPreview
+                  ? 'Existing scenes will be replaced upon confirmation.'
+                  : 'Detects headings: Scene 1, SCENE 1:, # Scene 1, etc.'}
               </span>
 
               <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setIsParserOpen(false)}
-                  className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition"
-                >
-                  Batal
-                </button>
-                <button
-                  onClick={handleParseRawText}
-                  disabled={!rawInputText.trim()}
-                  className="px-5 py-1.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 disabled:opacity-50 text-white text-xs font-semibold shadow-lg shadow-purple-600/20 flex items-center gap-1.5 transition"
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>Parse to Scene Cards</span>
-                </button>
+                {parsedPreview ? (
+                  <>
+                    <button
+                      onClick={handleCancelPreview}
+                      className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition"
+                    >
+                      Back to Edit
+                    </button>
+                    <button
+                      onClick={handleConfirmImport}
+                      className="px-5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-semibold shadow-lg shadow-emerald-600/20 flex items-center gap-1.5 transition"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Confirm & Replace Project</span>
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => setIsParserOpen(false)}
+                      className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleParseRawText}
+                      disabled={!rawInputText.trim()}
+                      className="px-5 py-1.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 disabled:opacity-50 text-white text-xs font-semibold shadow-lg shadow-purple-600/20 flex items-center gap-1.5 transition"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Parse & Preview</span>
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>

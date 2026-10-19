@@ -18,6 +18,7 @@ test('Security Module - Domain Allowlist Checker', async (t) => {
     assert.strictEqual(isDomainAllowed('google.com', ALLOWED_SERVICE_DOMAINS), true);
     assert.strictEqual(isDomainAllowed('claude.ai', ALLOWED_SERVICE_DOMAINS), true);
     assert.strictEqual(isDomainAllowed('chatgpt.com', ALLOWED_SERVICE_DOMAINS), true);
+    assert.ok(ALLOWED_MEDIA_DOMAINS.includes('gemini.google.com'));
   });
 
   await t.test('allows valid subdomains of allowed services', () => {

@@ -7,18 +7,31 @@ import { MODES, WEBVIEWS } from './constants';
 
 export default function App() {
   const [activeMode, setActiveMode] = useState(MODES.ANALYTICS);
-  const [geminiCounter, setGeminiCounter] = useState(() => {
+  const normalizeCounter = (val) => {
+    const num = parseInt(val, 10);
+    return isNaN(num) ? 0 : Math.max(0, Math.min(4, num));
+  };
+
+  const [geminiCounter, setGeminiCounterState] = useState(() => {
     try {
-      return parseInt(localStorage.getItem('aimc_gemini_counter') || '0', 10);
-    } catch (e) {
+      const saved = localStorage.getItem('aimc_gemini_counter');
+      return normalizeCounter(saved ?? 0);
+    } catch {
       return 0;
     }
   });
 
+  const setGeminiCounter = (updater) => {
+    setGeminiCounterState((prev) => {
+      const nextVal = typeof updater === 'function' ? updater(prev) : updater;
+      return normalizeCounter(nextVal);
+    });
+  };
+
   useEffect(() => {
     try {
       localStorage.setItem('aimc_gemini_counter', String(geminiCounter));
-    } catch (e) {}
+    } catch {}
   }, [geminiCounter]);
 
   const handleReloadActive = () => {
@@ -177,6 +190,7 @@ export default function App() {
       {/* Bottom Status & Quota Bar */}
       <StatusBar
         geminiCounter={geminiCounter}
+        setGeminiCounter={setGeminiCounter}
         maxGemini={4}
       />
     </div>
