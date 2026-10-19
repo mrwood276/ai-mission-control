@@ -7,6 +7,13 @@ export const SCHEMA_VERSION = 1;
 export const SCHEMA_IDENTIFIER = 'ai-mission-control/project-v1';
 export const BACKUP_IDENTIFIER = 'ai-mission-control/backup-v1';
 
+import {
+  createDefaultPublishingKit,
+  normalizePublishingKit,
+  PUBLISHING_STATUS,
+  computeStoryboardFingerprint,
+} from './publishingKitGenerator.js';
+
 export const STORAGE_KEYS = {
   PROJECTS_V1: 'aimc_projects_v1',
   ACTIVE_PROJECT_ID: 'aimc_active_project_id',
@@ -137,7 +144,9 @@ export function generateProjectId() {
 export function createNewProject(
   name = 'New Project',
   globalRules = DEFAULT_GLOBAL_RULES,
-  scenes = DEFAULT_SCENES
+  scenes = DEFAULT_SCENES,
+  storyboardSource = '',
+  publishingKit = null
 ) {
   const now = Date.now();
   return {
@@ -147,6 +156,8 @@ export function createNewProject(
     updatedAt: now,
     globalRules: typeof globalRules === 'string' ? globalRules : DEFAULT_GLOBAL_RULES,
     scenes: Array.isArray(scenes) ? JSON.parse(JSON.stringify(scenes)) : JSON.parse(JSON.stringify(DEFAULT_SCENES)),
+    storyboardSource: typeof storyboardSource === 'string' ? storyboardSource : '',
+    publishingKit: publishingKit || createDefaultPublishingKit(),
     metadata: {
       version: SCHEMA_VERSION,
     },
@@ -380,6 +391,7 @@ export function applyParsedStoryboardToProject(
   {
     globalRulesStrategy = GLOBAL_RULES_STRATEGY.USE_IMPORTED,
     mode = 'replace',
+    storyboardSource = undefined,
   } = {}
 ) {
   if (!project || typeof project !== 'object') {
@@ -409,11 +421,43 @@ export function applyParsedStoryboardToProject(
       ? [...(project.scenes || []), ...parsedResult.scenes]
       : [...parsedResult.scenes];
 
-  return {
+  const finalStoryboard =
+    typeof storyboardSource === 'string'
+      ? storyboardSource
+      : project.storyboardSource || '';
+
+  const updatedProject = {
     ...project,
     globalRules: finalRules,
     scenes: finalScenes,
+    storyboardSource: finalStoryboard,
     updatedAt: Date.now(),
+  };
+
+  // If a publishing kit was previously generated, check if the storyboard/scenes changed
+  if (project.publishingKit && project.publishingKit.lastGeneratedAt) {
+    const newFp = computeStoryboardFingerprint(updatedProject);
+    if (project.publishingKit.sourceFingerprint && project.publishingKit.sourceFingerprint !== newFp) {
+      updatedProject.publishingKit = {
+        ...project.publishingKit,
+        status: PUBLISHING_STATUS.NEEDS_REVIEW,
+      };
+    }
+  }
+
+  return updatedProject;
+}
+
+/**
+ * Ensures a project has an initialized Publishing Kit.
+ * @param {Object} project
+ * @returns {Object}
+ */
+export function ensurePublishingKit(project) {
+  if (!project || typeof project !== 'object') return project;
+  return {
+    ...project,
+    publishingKit: normalizePublishingKit(project.publishingKit),
   };
 }
 

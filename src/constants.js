@@ -42,4 +42,11 @@ export const WEBVIEWS = {
     badge: 'Scene Rendering FX',
     badgeColor: 'text-purple-400 bg-purple-950/60 border-purple-800/60',
   },
+  TIKTOK: {
+    id: 'tiktok',
+    name: 'TikTok',
+    url: 'https://www.tiktok.com/',
+    badge: 'Publishing',
+    badgeColor: 'text-cyan-400 bg-cyan-950/60 border-cyan-800/60',
+  },
 };

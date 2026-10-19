@@ -4,9 +4,17 @@ import StatusBar from './components/StatusBar';
 import WebviewWrapper from './components/WebviewWrapper';
 import PipelineSidebar from './components/PipelineSidebar';
 import { MODES, WEBVIEWS } from './constants';
+import { isPlatformEnabled, SUPPORTED_PLATFORMS } from './utils/publishingKitGenerator';
 
 export default function App() {
   const [activeMode, setActiveMode] = useState(MODES.ANALYTICS);
+  const [publishingWorkspace, setPublishingWorkspace] = useState(null); // null | 'youtube'
+
+  const handleSetMode = (mode) => {
+    setPublishingWorkspace(null);
+    setActiveMode(mode);
+  };
+
   const normalizeCounter = (val) => {
     const num = parseInt(val, 10);
     return isNaN(num) ? 0 : Math.max(0, Math.min(4, num));
@@ -35,9 +43,11 @@ export default function App() {
   }, [geminiCounter]);
 
   const handleReloadActive = () => {
-    // Reload active webviews based on mode
+    // Reload active webviews based on publishing workspace or mode
     let ids = [];
-    if (activeMode === MODES.ANALYTICS) {
+    if (publishingWorkspace === 'youtube') {
+      ids = [WEBVIEWS.YOUTUBE.id];
+    } else if (activeMode === MODES.ANALYTICS) {
       ids = [WEBVIEWS.YOUTUBE.id, WEBVIEWS.CLAUDE.id];
     } else if (activeMode === MODES.PROMPT_ENGINEERING) {
       ids = [WEBVIEWS.CLAUDE.id, WEBVIEWS.CHATGPT.id];
@@ -64,6 +74,17 @@ export default function App() {
 
   // Helper to determine CSS classes and flex order for each element without ever unmounting them
   const getElementLayout = (elementId) => {
+    // Publishing Workspace View: Keeps PipelineSidebar on the left and the platform webview on the right
+    if (publishingWorkspace) {
+      if (elementId === 'sidebar') {
+        return { visible: true, className: 'w-[28%] min-w-[320px] max-w-[420px] flex', order: 1 };
+      }
+      if (publishingWorkspace === 'youtube' && elementId === WEBVIEWS.YOUTUBE.id) {
+        return { visible: true, className: 'flex-1 flex', order: 2 };
+      }
+      return { visible: false, className: 'hidden', order: 99 };
+    }
+
     switch (activeMode) {
       case MODES.ANALYTICS:
         if (elementId === WEBVIEWS.YOUTUBE.id) {
@@ -108,6 +129,7 @@ export default function App() {
   const chatgptLayout = getElementLayout(WEBVIEWS.CHATGPT.id);
   const geminiLayout = getElementLayout(WEBVIEWS.GEMINI.id);
   const flowLayout = getElementLayout(WEBVIEWS.GOOGLE_FLOW.id);
+  const tiktokLayout = getElementLayout(WEBVIEWS.TIKTOK.id);
   const sidebarLayout = getElementLayout('sidebar');
 
   return (
@@ -115,7 +137,7 @@ export default function App() {
       {/* Top Navigation Bar */}
       <TopNav
         activeMode={activeMode}
-        setActiveMode={setActiveMode}
+        setActiveMode={handleSetMode}
         onReloadActive={handleReloadActive}
         onReloadAll={handleReloadAll}
       />
@@ -144,13 +166,22 @@ export default function App() {
           orderStyle={{ order: claudeLayout.order }}
         />
 
-        {/* Persistent Pipeline Sidebar (Visible in Mode 2 & Mode 3) */}
+        {/* Persistent Pipeline Sidebar (Visible in Mode 2, Mode 3, and Publishing Workspace) */}
         <PipelineSidebar
           activeMode={activeMode}
           geminiCounter={geminiCounter}
           setGeminiCounter={setGeminiCounter}
           className={sidebarLayout.className}
           orderStyle={{ order: sidebarLayout.order }}
+          publishingWorkspace={publishingWorkspace}
+          onOpenPlatformWorkspace={(platform) => {
+            if (platform === 'youtube' || platform === 'youtube_long' || platform === 'youtube_shorts') {
+              setPublishingWorkspace('youtube');
+            } else if (isPlatformEnabled(platform)) {
+              setPublishingWorkspace(platform);
+            }
+          }}
+          onClosePlatformWorkspace={() => setPublishingWorkspace(null)}
         />
 
         {/* 3. ChatGPT Webview */}
@@ -185,6 +216,19 @@ export default function App() {
           className={flowLayout.className}
           orderStyle={{ order: flowLayout.order }}
         />
+
+        {/* 6. TikTok Webview (Strictly disabled: never mounted into DOM) */}
+        {isPlatformEnabled(SUPPORTED_PLATFORMS.TIKTOK) && publishingWorkspace === 'tiktok' && (
+          <WebviewWrapper
+            id={WEBVIEWS.TIKTOK.id}
+            name={WEBVIEWS.TIKTOK.name}
+            url={WEBVIEWS.TIKTOK.url}
+            badge={WEBVIEWS.TIKTOK.badge}
+            badgeColor={WEBVIEWS.TIKTOK.badgeColor}
+            className={tiktokLayout.className}
+            orderStyle={{ order: tiktokLayout.order }}
+          />
+        )}
       </main>
 
       {/* Bottom Status & Quota Bar */}

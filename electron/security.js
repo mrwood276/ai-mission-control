@@ -12,6 +12,7 @@ const ALLOWED_SERVICE_DOMAINS = [
   'chatgpt.com',
   'openai.com',
   'labs.google',
+  'tiktok.com',
 ];
 
 // Domains permitted for microphone / media input (e.g. voice dictation in chat)

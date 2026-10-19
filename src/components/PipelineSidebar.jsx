@@ -30,11 +30,14 @@ import {
   Sliders,
   HelpCircle,
   Send,
-  Clock
+  Clock,
+  Share2
 } from 'lucide-react';
 import { MODES, WEBVIEWS } from '../constants';
 import { injectTextToWebview, injectFreshGemini, DELIVERY_STATUS } from '../utils/webviewInjection';
 import { parsePromptText } from '../utils/sceneParser';
+import PublishingKitPanel from './PublishingKitPanel';
+import { computeStoryboardFingerprint } from '../utils/publishingKitGenerator';
 import {
   migrateLegacyData,
   saveProjectsToStorage,
@@ -71,6 +74,9 @@ export default function PipelineSidebar({
   setGeminiCounter,
   className = '',
   orderStyle = {},
+  publishingWorkspace = null,
+  onOpenPlatformWorkspace,
+  onClosePlatformWorkspace,
 }) {
   const [collapsed, setCollapsed] = useState(() => {
     try {
@@ -108,6 +114,13 @@ export default function PipelineSidebar({
   const [deliveringAction, setDeliveringAction] = useState(null); // { sceneId, target }
   const [sceneToDelete, setSceneToDelete] = useState(null);
   const [isDoneSectionCollapsed, setIsDoneSectionCollapsed] = useState(false);
+  const [sidebarTab, setSidebarTab] = useState('scenes'); // 'scenes' or 'publishing'
+
+  const currentFingerprint = computeStoryboardFingerprint(activeProject);
+  const isPublishingNeedsReview =
+    activeProject.publishingKit?.status === 'needs_review' ||
+    (Boolean(activeProject.publishingKit?.sourceFingerprint) &&
+      activeProject.publishingKit.sourceFingerprint !== currentFingerprint);
 
   // Flow Send Confirmation Dialog State
   const [flowConfirmScene, setFlowConfirmScene] = useState(null);
@@ -171,12 +184,18 @@ export default function PipelineSidebar({
     };
   }, [projects, activeProjectId]);
 
-  // Persist Collapsed State
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEYS.SIDEBAR_COLLAPSED, JSON.stringify(collapsed));
     } catch {}
   }, [collapsed]);
+
+  // When publishing workspace opens, switch to publishing tab
+  useEffect(() => {
+    if (publishingWorkspace) {
+      setSidebarTab('publishing');
+    }
+  }, [publishingWorkspace]);
 
   // Auto-dismiss toast
   useEffect(() => {
@@ -254,6 +273,10 @@ export default function PipelineSidebar({
       if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(wrapper);
         setIntakeStatus(INTAKE_STATUS.COPIED_TO_CLIPBOARD);
+        updateActiveProject((p) => ({
+          ...p,
+          storyboardSource: intakeSourceText,
+        }));
         showToast('✓ Complete Prompt Wrapper copied to clipboard! Ready to paste into ChatGPT.', 'success');
       } else {
         showToast('Clipboard write is not supported in this environment.', 'warning');
@@ -297,6 +320,7 @@ export default function PipelineSidebar({
       const updatedProject = applyParsedStoryboardToProject(activeProject, parsedPreview, {
         globalRulesStrategy: rulesStrategy,
         mode: importMode,
+        storyboardSource: intakeSourceText || activeProject.storyboardSource,
       });
 
       updateActiveProject(() => updatedProject);
@@ -934,6 +958,22 @@ export default function PipelineSidebar({
               >
                 <ClipboardPaste className="w-3.5 h-3.5" />
               </button>
+
+              {/* Publishing Kit Toggle Button */}
+              <button
+                onClick={() => setSidebarTab(sidebarTab === 'publishing' ? 'scenes' : 'publishing')}
+                aria-label="Toggle Publishing Kit"
+                className={`p-1 rounded transition focus-visible:ring-1 focus-visible:ring-purple-400 focus:outline-none border ${
+                  sidebarTab === 'publishing'
+                    ? 'bg-purple-600 text-white border-purple-500 shadow-sm'
+                    : isPublishingNeedsReview
+                    ? 'bg-amber-600/30 hover:bg-amber-600 text-amber-300 hover:text-white border-amber-500/40'
+                    : 'bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white border-slate-700'
+                }`}
+                title="Toggle Publishing Kit (YouTube Shorts & Long-form)"
+              >
+                <Share2 className="w-3.5 h-3.5" />
+              </button>
             </>
           )}
         </div>
@@ -1089,8 +1129,55 @@ export default function PipelineSidebar({
             </div>
           </div>
 
-          {/* Quick Handoff Banner in Mode 2 */}
-          {activeMode === MODES.PROMPT_ENGINEERING && (
+          {/* View Mode Switcher: Scenes vs. Publishing Kit */}
+          <div className="flex items-center border-b border-slate-800 bg-slate-900/60 p-1 gap-1 flex-shrink-0 select-none">
+            <button
+              onClick={() => setSidebarTab('scenes')}
+              aria-label="Scene Pipeline Tab"
+              className={`flex-1 py-1 px-2 rounded-lg font-medium text-[11px] flex items-center justify-center gap-1.5 transition ${
+                sidebarTab === 'scenes'
+                  ? 'bg-purple-950/60 text-purple-200 border border-purple-800/50 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-850'
+              }`}
+            >
+              <FileText className="w-3 h-3 text-sky-400" />
+              <span>Scenes ({totalActiveCount})</span>
+            </button>
+
+            <button
+              onClick={() => setSidebarTab('publishing')}
+              aria-label="Publishing Kit Tab"
+              className={`flex-1 py-1 px-2 rounded-lg font-medium text-[11px] flex items-center justify-center gap-1.5 transition ${
+                sidebarTab === 'publishing'
+                  ? 'bg-purple-950/60 text-purple-200 border border-purple-800/50 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-850'
+              }`}
+            >
+              <Share2 className="w-3 h-3 text-purple-400" />
+              <span>Publishing Kit</span>
+              {isPublishingNeedsReview ? (
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" title="Needs review" />
+              ) : activeProject.publishingKit?.status === 'ready' ? (
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" title="Ready" />
+              ) : null}
+            </button>
+          </div>
+
+          {sidebarTab === 'publishing' ? (
+            <div className="flex-1 overflow-hidden flex flex-col">
+              <PublishingKitPanel
+                project={activeProject}
+                onUpdateProject={updateActiveProject}
+                onShowToast={showToast}
+                publishingWorkspace={publishingWorkspace}
+                onOpenPlatformWorkspace={onOpenPlatformWorkspace}
+                onClosePlatformWorkspace={onClosePlatformWorkspace}
+              />
+            </div>
+          ) : (
+            <>
+              {/* Quick Handoff Banner in Mode 2 */}
+              {activeMode === MODES.PROMPT_ENGINEERING && (
             <div className="p-2.5 bg-gradient-to-r from-purple-950/40 to-slate-900 border-b border-purple-800/30 flex flex-col gap-2 flex-shrink-0">
               <div className="flex items-center justify-between">
                 <span className="font-semibold text-purple-300 text-[11px] flex items-center gap-1">
@@ -1281,6 +1368,8 @@ export default function PipelineSidebar({
               </>
             )}
           </div>
+            </>
+          )}
         </div>
       )}
 
