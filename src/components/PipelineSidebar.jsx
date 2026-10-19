@@ -20,7 +20,8 @@ import {
   ArrowRight,
   ListFilter
 } from 'lucide-react';
-import { MODES } from '../constants';
+import { MODES, WEBVIEWS } from '../constants';
+import { injectTextToWebview, injectFreshGemini } from '../utils/webviewInjection';
 
 const STORAGE_KEYS = {
   GLOBAL_RULES: 'aimc_global_rules',
@@ -252,35 +253,53 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
   // Action Button Handlers
   const handleSendToGemini = async (scene) => {
     try {
-      await navigator.clipboard.writeText(scene.prompt);
+      const nextCount = Math.min((geminiCounter || 0) + 1, 4);
       if (setGeminiCounter) {
-        setGeminiCounter((prev) => Math.min(prev + 1, 4));
+        setGeminiCounter(nextCount);
       }
-      showToast(`Prompt ${scene.title} disalin untuk Gemini! (Quota: ${Math.min((geminiCounter || 0) + 1, 4)}/4)`, 'success');
+      const res = await injectTextToWebview(WEBVIEWS.GEMINI.id, scene.prompt);
+      showToast(
+        `▶️ Gemini: ${res.method === 'dom-injection' ? 'Disuntikkan ke input webview' : 'Disalin ke clipboard'}! (Load: ${nextCount}/4)`,
+        'success'
+      );
     } catch (e) {
-      showToast('Gagal menyalin prompt.', 'error');
+      showToast('Gagal menyuntikkan prompt ke Gemini.', 'error');
     }
   };
 
   const handleFreshGeminiGlobal = async (scene) => {
     try {
-      const fullPrompt = `${globalRules.trim()}\n\n---\n\n${scene.prompt.trim()}`;
-      await navigator.clipboard.writeText(fullPrompt);
+      const fullPrompt = globalRules?.trim()
+        ? `${globalRules.trim()}\n\n${scene.prompt.trim()}`
+        : scene.prompt.trim();
+
       if (setGeminiCounter) {
         setGeminiCounter(1);
       }
-      showToast(`Fresh Session: Global Rules + ${scene.title} disalin! (Counter di-reset ke 1)`, 'success');
+      showToast('🔄 Membuka fresh chat Gemini & menyuntikkan Global Rules + Scene Prompt...', 'info');
+      const res = await injectFreshGemini(WEBVIEWS.GEMINI.id, fullPrompt);
+      showToast(
+        `✓ Gemini Fresh: ${res.method === 'dom-injection' ? 'Input berhasil diisi' : 'Prompt siap di clipboard'}! (Load: 1/4)`,
+        'success'
+      );
     } catch (e) {
-      showToast('Gagal menyalin prompt.', 'error');
+      showToast('Gagal memuat fresh chat Gemini.', 'error');
     }
   };
 
   const handleSendToFlow = async (scene) => {
     try {
-      await navigator.clipboard.writeText(scene.prompt);
-      showToast(`Prompt ${scene.title} disalin untuk Google Flow FX!`, 'success');
+      const flowPrompt = globalRules?.trim()
+        ? `${globalRules.trim()}\n\n${scene.prompt.trim()}`
+        : scene.prompt.trim();
+
+      const res = await injectTextToWebview(WEBVIEWS.GOOGLE_FLOW.id, flowPrompt);
+      showToast(
+        `🎬 Flow: ${res.method === 'dom-injection' ? 'Disuntikkan ke Google Flow' : 'Disalin ke clipboard'}!`,
+        'success'
+      );
     } catch (e) {
-      showToast('Gagal menyalin prompt.', 'error');
+      showToast('Gagal menyuntikkan prompt ke Flow.', 'error');
     }
   };
 
@@ -372,16 +391,34 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
           )}
         </button>
 
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1.5">
           {!collapsed && (
-            <button
-              onClick={() => setIsParserOpen(true)}
-              className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-purple-300 hover:text-white text-[11px] flex items-center gap-1 transition"
-              title="Open Raw AI Output Parser"
-            >
-              <ClipboardPaste className="w-3 h-3 text-purple-400" />
-              <span>Parser</span>
-            </button>
+            <>
+              {/* Gemini Load: X/4 Badge */}
+              <div
+                className={`px-1.5 py-0.5 rounded text-[10px] font-mono flex items-center gap-1 border transition-all ${
+                  geminiCounter >= 4
+                    ? 'bg-rose-950/90 border-rose-500 text-rose-300 animate-pulse font-bold ring-1 ring-rose-500/50'
+                    : geminiCounter >= 3
+                    ? 'bg-amber-950/80 border-amber-500 text-amber-300 font-semibold'
+                    : 'bg-slate-800 border-slate-700 text-slate-300'
+                }`}
+                title="Gemini Session Load (Max 4 scenes before context reset recommended)"
+              >
+                <span>Gemini:</span>
+                <span>{geminiCounter || 0}/4</span>
+                {geminiCounter >= 4 && <span className="text-[10px] text-rose-400">⚠️</span>}
+              </div>
+
+              <button
+                onClick={() => setIsParserOpen(true)}
+                className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-purple-300 hover:text-white text-[11px] flex items-center gap-1 transition"
+                title="Open Raw AI Output Parser"
+              >
+                <ClipboardPaste className="w-3 h-3 text-purple-400" />
+                <span>Parser</span>
+              </button>
+            </>
           )}
 
           <button
@@ -630,33 +667,41 @@ ${clipboardText.trim() ? clipboardText.trim() : '[PASTE YOUR CLAUDE STORYBOARD S
                       />
                     </div>
 
-                    {/* Action Buttons: [Send to Gemini], [Fresh Gemini + Global], [Send to Flow] */}
-                    <div className="flex items-center gap-1 pt-1 border-t border-slate-900/80">
+                    {/* Action Buttons: [▶️ Gemini], [🔄 Fresh+Global], [🎬 Flow] */}
+                    <div className="flex items-center gap-1.5 pt-1 border-t border-slate-900/80">
                       <button
                         onClick={() => handleSendToGemini(scene)}
-                        className="flex-1 py-1 px-1.5 rounded bg-sky-600/70 hover:bg-sky-500 text-white text-[10px] font-medium flex items-center justify-center gap-1 transition"
-                        title="Salin Scene Prompt untuk Gemini chat aktif"
+                        className="flex-1 py-1 px-1.5 rounded bg-sky-600/80 hover:bg-sky-500 text-white text-[10px] font-medium flex items-center justify-center gap-1 transition shadow-sm"
+                        title="Inject scene prompt into Gemini webview (+1 to load)"
                       >
                         <Send className="w-2.5 h-2.5" />
-                        <span>Gemini</span>
+                        <span>▶️ Gemini</span>
                       </button>
 
                       <button
                         onClick={() => handleFreshGeminiGlobal(scene)}
-                        className="flex-1 py-1 px-1.5 rounded bg-amber-600/70 hover:bg-amber-500 text-white text-[10px] font-medium flex items-center justify-center gap-1 transition"
-                        title="Reset sesi chat & salin Global Rules + Scene Prompt bersamaan"
+                        className={`flex-1 py-1 px-1.5 rounded text-white text-[10px] font-medium flex items-center justify-center gap-1 transition shadow-sm ${
+                          geminiCounter >= 4
+                            ? 'bg-orange-600 hover:bg-orange-500 ring-2 ring-orange-400 animate-pulse font-bold'
+                            : 'bg-amber-600/80 hover:bg-amber-500'
+                        }`}
+                        title={
+                          geminiCounter >= 4
+                            ? 'Recommended: Reset Gemini context (4/4 reached) + inject Global Rules + Scene Prompt'
+                            : 'Open fresh Gemini chat + inject Global Rules + Scene Prompt (Resets load to 1/4)'
+                        }
                       >
                         <Flame className="w-2.5 h-2.5" />
-                        <span>Fresh+Global</span>
+                        <span>🔄 Fresh+Global</span>
                       </button>
 
                       <button
                         onClick={() => handleSendToFlow(scene)}
-                        className="flex-1 py-1 px-1.5 rounded bg-purple-600/70 hover:bg-purple-500 text-white text-[10px] font-medium flex items-center justify-center gap-1 transition"
-                        title="Salin Scene Prompt untuk Google Flow FX"
+                        className="flex-1 py-1 px-1.5 rounded bg-purple-600/80 hover:bg-purple-500 text-white text-[10px] font-medium flex items-center justify-center gap-1 transition shadow-sm"
+                        title="Combine Global Rules + Scene Prompt and inject/copy to Google Flow"
                       >
                         <Sparkles className="w-2.5 h-2.5" />
-                        <span>Flow</span>
+                        <span>🎬 Flow</span>
                       </button>
                     </div>
                   </div>

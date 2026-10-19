@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import TopNav from './components/TopNav';
 import StatusBar from './components/StatusBar';
 import WebviewWrapper from './components/WebviewWrapper';
@@ -7,7 +7,19 @@ import { MODES, WEBVIEWS } from './constants';
 
 export default function App() {
   const [activeMode, setActiveMode] = useState(MODES.ANALYTICS);
-  const [geminiCounter, setGeminiCounter] = useState(0);
+  const [geminiCounter, setGeminiCounter] = useState(() => {
+    try {
+      return parseInt(localStorage.getItem('aimc_gemini_counter') || '0', 10);
+    } catch (e) {
+      return 0;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('aimc_gemini_counter', String(geminiCounter));
+    } catch (e) {}
+  }, [geminiCounter]);
 
   const handleReloadActive = () => {
     // Reload active webviews based on mode
