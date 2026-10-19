@@ -47,6 +47,8 @@ npm run dev
 ```
 
 ### 3. Build & Run Production Version
+> **Penting:** Selalu jalankan `npm run build` sebelum `npm start`. Tanpa folder `dist/`, aplikasi akan fallback mencari `http://localhost:5173` dan menampilkan layar kosong jika server Vite dev tidak berjalan.
+
 ```bash
 npm run build
 npm start
