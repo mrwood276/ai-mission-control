@@ -29,13 +29,20 @@ function setupSession() {
   targetSessions.forEach((ses) => {
     ses.setUserAgent(CLEAN_USER_AGENT);
 
-    // Reject bluetooth, hid, and usb permissions to stop Windows Security Passkey prompts
+    const ALLOWED_PERMISSIONS = new Set([
+      'clipboard-read',
+      'clipboard-sanitized-write',
+      'fullscreen',
+      'notifications',
+      'media',
+    ]);
+
     ses.setPermissionRequestHandler((_webContents, permission, callback) => {
-      const blockedPermissions = ['bluetooth', 'hid', 'usb', 'u2f-devices'];
-      if (blockedPermissions.includes(permission)) {
-        return callback(false);
-      }
-      callback(true);
+      callback(ALLOWED_PERMISSIONS.has(permission));
+    });
+
+    ses.setPermissionCheckHandler((_webContents, permission) => {
+      return ALLOWED_PERMISSIONS.has(permission);
     });
 
     // Intercept headers:
