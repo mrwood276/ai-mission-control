@@ -355,3 +355,65 @@ export function parseAndValidateProjectImport(input) {
 
   return { valid: true, project: importedProject, errors: [] };
 }
+
+export const GLOBAL_RULES_STRATEGY = {
+  USE_IMPORTED: 'imported',
+  KEEP_ACTIVE: 'keep_active',
+  USE_DEFAULT: 'use_default',
+  CLEAR: 'clear',
+};
+
+/**
+ * Safely applies a parsed storyboard to a project with explicit Global Rules strategy
+ * and explicit replacement or merge modes.
+ *
+ * @param {Object} project - Active project
+ * @param {Object} parsedResult - Output from parsePromptText
+ * @param {Object} [options]
+ * @param {string} [options.globalRulesStrategy='imported'] - One of GLOBAL_RULES_STRATEGY
+ * @param {string} [options.mode='replace'] - 'replace' or 'append'
+ * @returns {Object} Updated project object
+ */
+export function applyParsedStoryboardToProject(
+  project,
+  parsedResult,
+  {
+    globalRulesStrategy = GLOBAL_RULES_STRATEGY.USE_IMPORTED,
+    mode = 'replace',
+  } = {}
+) {
+  if (!project || typeof project !== 'object') {
+    throw new Error('Project must be a valid object');
+  }
+  if (!parsedResult || !Array.isArray(parsedResult.scenes)) {
+    throw new Error('Parsed result must contain an array of scenes');
+  }
+
+  let finalRules = project.globalRules || '';
+
+  if (parsedResult.globalRules && globalRulesStrategy === GLOBAL_RULES_STRATEGY.USE_IMPORTED) {
+    finalRules = parsedResult.globalRules;
+  } else if (!parsedResult.globalRules) {
+    if (globalRulesStrategy === GLOBAL_RULES_STRATEGY.CLEAR) {
+      finalRules = '';
+    } else if (globalRulesStrategy === GLOBAL_RULES_STRATEGY.USE_DEFAULT) {
+      finalRules = DEFAULT_GLOBAL_RULES;
+    } else {
+      // KEEP_ACTIVE: preserve project.globalRules
+      finalRules = project.globalRules || '';
+    }
+  }
+
+  const finalScenes =
+    mode === 'append'
+      ? [...(project.scenes || []), ...parsedResult.scenes]
+      : [...parsedResult.scenes];
+
+  return {
+    ...project,
+    globalRules: finalRules,
+    scenes: finalScenes,
+    updatedAt: Date.now(),
+  };
+}
+

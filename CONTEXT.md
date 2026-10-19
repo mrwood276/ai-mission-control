@@ -38,11 +38,13 @@ Located in [`src/utils/projectManager.js`](file:///d:/ai-mission-control/src/uti
 - **Autosave & Backup**: Debounced local storage synchronization with export/import validation and seamless migration from legacy unversioned storage (`aimc_global_rules`, `aimc_scenes`).
 
 ### Pipeline Engine & Prompt Delivery
-Located in [`src/components/PipelineSidebar.jsx`](file:///d:/ai-mission-control/src/components/PipelineSidebar.jsx) and [`src/utils/webviewInjection.js`](file:///d:/ai-mission-control/src/utils/webviewInjection.js):
-- **Scene Parser**: Robust regex parser supporting various Markdown heading formats, multiline prompts, and non-sequential numbers with interactive preview.
-- **Search & Filtering**: Real-time filtering across scene numbers, titles, and prompts.
-- **In-Flight Action Guard**: Disables buttons during prompt injection to prevent duplicate submissions.
-- **Delivery Engine**: Injects formatted prompt into target webview DOM. Automatically falls back to system clipboard with clear outcome states (`inserted`, `copied`, `failed`).
+Located in [`src/components/PipelineSidebar.jsx`](file:///d:/ai-mission-control/src/components/PipelineSidebar.jsx), [`src/utils/storyboardIntake.js`](file:///d:/ai-mission-control/src/utils/storyboardIntake.js), [`src/utils/promptTemplate.js`](file:///d:/ai-mission-control/src/utils/promptTemplate.js), [`src/utils/sceneParser.js`](file:///d:/ai-mission-control/src/utils/sceneParser.js), [`src/utils/promptComposer.js`](file:///d:/ai-mission-control/src/utils/promptComposer.js), and [`src/utils/webviewInjection.js`](file:///d:/ai-mission-control/src/utils/webviewInjection.js):
+- **Storyboard Intake & Source Validation**: Validates Claude storyboards, supports manual paste and clipboard reading with truthful status states (`empty`, `source-entered`, `source-needs-review`, `source-validated`, `wrapper-ready`, `copied-to-clipboard`, `failed`).
+- **Director Prompt Wrapper Builder**: Generates production prompt wrappers supporting configurable aspect ratios, artistic styles, voice-over preservation, and exact human-readable formatting.
+- **Scene Parser & Validation**: Robust regex parser extracting Global Rules and numbered scenes with blocking errors, non-blocking warnings, and unparsed preamble retention.
+- **Safe Import & Project Data**: Interactive preview displaying parsed cards, warnings, and missing Global Rules strategies (`keep_active`, `use_default`, `clear`) with replace or append modes.
+- **Prompt Composer & Quality Gate**: Canonical composition engine avoiding duplicate Global Rules, providing token and char counts, and verifying format consistency.
+- **Verified Delivery Engine**: Safe DOM injection into Google Flow and Gemini webviews with post-injection readback verification, bounded timeouts, concurrency locks, and clipboard fallback (`inserted-verified`, `copied-manual`, `failed`). Never automatically clicks Generate. Detailed documentation in [`docs/pipeline-workflow.md`](docs/pipeline-workflow.md).
 
 ### Security Framework
 Located in [`electron/security.js`](file:///d:/ai-mission-control/electron/security.js) and [`electron/main.js`](file:///d:/ai-mission-control/electron/main.js):

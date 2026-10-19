@@ -131,12 +131,15 @@ To ensure stability, safety, and traceability:
 - **Data Portability**: Clean JSON project export and schema-validated import with format checks.
 - **Automatic Migration**: Safely migrates legacy unversioned single-workspace storage keys (`aimc_global_rules`, `aimc_scenes`) without data loss.
 
-### 3. Pipeline Sidebar & Scene Manager
+### 3. Storyboard-to-Google-Flow Production Pipeline
 
-- **Search & Filtering**: Real-time scene filtering by scene number, title, or prompt content.
-- **In-Flight Action Guard**: Disables prompt injection triggers during execution to prevent duplicate submissions.
-- **Scene Parsing**: Structured parser accepting Markdown scene headings (`## Scene 1: Title`), multiline prompts, and optional Global Rules with interactive preview before applying.
-- **Prompt Delivery**: DOM injection with automatic fallback to system clipboard (`inserted`, `copied`, `failed`).
+- **Claude Storyboard Intake**: Input validation with truthful lifecycle tracking (`empty`, `source-entered`, `source-needs-review`, `source-validated`, `wrapper-ready`, `copied-to-clipboard`, `failed`). Supports manual pasting and clipboard reading with graceful error guidance (never substitutes false placeholders).
+- **Director Prompt Wrapper Builder**: Configurable aspect ratio (16:9, 9:16, 1:1, 4:3, 21:9, 2.39:1) and artistic style presets (Photorealistic, 35mm film, Unreal Engine 5, Anime Cyberpunk, etc.). Preserves original narrative order, scene count, and verbatim voice-over/dialogue.
+- **Scene Parsing & Structured Validation**: Comprehensive regex parser extracting Global Rules and numbered scene cards with blocking errors, non-blocking warnings, and unparsed preamble retention.
+- **Safe Project Import**: Interactive preview allowing creators to inspect parsed scenes, warnings, and unparsed content. Features explicit strategies for missing Global Rules (Keep Active, Use Defaults, Leave Empty) and destination modes (Replace Active or Append).
+- **Canonical Prompt Composition & Quality Gate**: Deterministic prompt composition preventing duplicate Global Rules. Provides character count, approximate token count (`~length/4`), and quality checks for empty prompts or conflicting aspect ratios.
+- **Verified Delivery Engine**: Safe DOM injection into Google Flow and Gemini webviews featuring bounded timeouts, concurrency guards, and post-injection **readback verification** (`inserted-verified`). Automatically falls back to system clipboard copy (`copied-manual`) when DOM inputs are unverified or unreachable. Never automatically clicks Generate.
+- **Architecture Documentation**: Full pipeline specifications are available in [`docs/pipeline-workflow.md`](docs/pipeline-workflow.md).
 
 ### 4. Status Bar & Usage Trackers
 
