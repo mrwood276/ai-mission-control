@@ -82,9 +82,9 @@ export default function WebviewWrapper({
     }
   };
 
-  const stealthPreloadUrl = (typeof window !== 'undefined' && window.electronAPI?.stealthPreloadPath)
-    ? `file://${window.electronAPI.stealthPreloadPath.replace(/\\/g, '/')}`
-    : undefined;
+  const isElectron = typeof window !== 'undefined' && Boolean(window.electronAPI?.isElectron);
+  const stealthPreloadUrl = typeof window !== 'undefined' ? window.electronAPI?.stealthPreloadUrl : undefined;
+  const canRenderWebview = !isElectron || Boolean(stealthPreloadUrl);
 
   return (
     <div 
@@ -151,16 +151,23 @@ export default function WebviewWrapper({
 
       {/* Persistent Electron Webview Instance */}
       <div className="flex-1 w-full h-full relative bg-slate-950">
-        <webview
-          id={id}
-          ref={webviewRef}
-          src={url}
-          partition={SESSION_PARTITION}
-          useragent={CHROME_USER_AGENT || undefined}
-          preload={stealthPreloadUrl}
-          allowpopups="true"
-          style={{ width: '100%', height: '100%', display: 'flex' }}
-        />
+        {canRenderWebview ? (
+          <webview
+            id={id}
+            ref={webviewRef}
+            src={url}
+            partition={SESSION_PARTITION}
+            useragent={CHROME_USER_AGENT || undefined}
+            preload={stealthPreloadUrl}
+            allowpopups="true"
+            style={{ width: '100%', height: '100%', display: 'flex' }}
+          />
+        ) : (
+          <div className="flex items-center justify-center h-full text-slate-500 text-xs">
+            <Loader2 className="w-4 h-4 animate-spin mr-2 text-sky-400" />
+            <span>Memuat konfigurasi webview...</span>
+          </div>
+        )}
       </div>
     </div>
   );
