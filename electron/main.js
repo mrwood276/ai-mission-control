@@ -2,20 +2,25 @@ const { app, BrowserWindow, session, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
-// 1. Sembunyikan flag otomasi & matikan WebAuthn agar Windows Security (Passkey/Bluetooth) tidak muncul
+// 1. Hide automation flags via native engine switch
 app.commandLine.appendSwitch('disable-blink-features', 'AutomationControlled');
+
+// 2. Disable WebAuthentication features that trigger Windows Security Passkey popups,
+// while preserving Site Isolation (do not disable site-per-process or IsolateOrigins)
 app.commandLine.appendSwitch(
   'disable-features',
   'WebAuthentication,WebAuthenticationConditionalUI,AdditionOfConfirmationToWebAuthn,OutOfProcessPdf'
 );
 
-// 2. Buat User-Agent Chrome yang 100% cocok dengan versi Chromium asli di Electron ini
+// 3. Derive clean desktop User-Agent and sec-ch-ua dynamically from actual Chromium version (Chrome 132 in Electron 34)
 const chromeVersion = process.versions.chrome || '132.0.0.0';
-const majorChromeVersion = chromeVersion.split('.')[0];
-const CLEAN_USER_AGENT = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`;
+const majorVersion = chromeVersion.split('.')[0] || '132';
 
-// Gunakan partisi baru (v3) agar sisa cache/cookie gagal login sebelumnya bersih total
+const CLEAN_USER_AGENT =
+  `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`;
+
 const PARTITION_NAME = 'persist:clean_chrome_v3';
+const stealthPreloadPath = path.join(__dirname, 'preload-stealth.js');
 
 app.userAgentFallback = CLEAN_USER_AGENT;
 
@@ -28,18 +33,30 @@ function setupSession() {
   targetSessions.forEach((ses) => {
     ses.setUserAgent(CLEAN_USER_AGENT);
 
-    // Tolak otomatis izin WebAuthn / MIDI / Hid yang memicu pop-up hardware Windows Security
+    // Register deep preload-stealth script on all WebContents belonging to this session
+    try {
+      if (typeof ses.setPreloads === 'function') {
+        ses.setPreloads([stealthPreloadPath]);
+      }
+    } catch (e) {
+      console.warn('Could not set preloads on session:', e.message);
+    }
+
+    // Reject bluetooth, hid, and usb permissions to stop Windows Security Passkey prompts
     ses.setPermissionRequestHandler((_webContents, permission, callback) => {
-      if (['hid', 'usb', 'serial', 'bluetooth', 'bluetoothScanning'].includes(permission)) {
+      const blockedPermissions = ['bluetooth', 'hid', 'usb', 'u2f-devices'];
+      if (blockedPermissions.includes(permission)) {
         return callback(false);
       }
       callback(true);
     });
 
-    // Sesuaikan Client Hints secara dinamis dengan versi Chromium asli Electron
+    // Intercept headers:
+    // - Explicitly set dynamic Chromium version User-Agent & sec-ch-ua
+    // - Remove Google app signature (X-Client-Data)
     ses.webRequest.onBeforeSendHeaders((details, callback) => {
       details.requestHeaders['User-Agent'] = CLEAN_USER_AGENT;
-      details.requestHeaders['sec-ch-ua'] = `"Not A(Brand";v="8", "Chromium";v="${majorChromeVersion}", "Google Chrome";v="${majorChromeVersion}"`;
+      details.requestHeaders['sec-ch-ua'] = `"Google Chrome";v="${majorVersion}", "Chromium";v="${majorVersion}", "Not_A Brand";v="24"`;
       details.requestHeaders['sec-ch-ua-mobile'] = '?0';
       details.requestHeaders['sec-ch-ua-platform'] = '"Windows"';
       delete details.requestHeaders['X-Client-Data'];
@@ -48,22 +65,21 @@ function setupSession() {
   });
 
   app.on('web-contents-created', (_event, contents) => {
-    // Matikan navigator.credentials (Passkey prompt) hanya di halaman login Google agar tidak memicu Windows Security
-    contents.on('did-start-navigation', (_e, url) => {
-      if (url.includes('accounts.google.com')) {
+    // Disable PublicKeyCredential on accounts.google.com to prevent Windows Security Bluetooth/Passkey dialogs
+    contents.on('did-start-navigation', (_navEvent, url) => {
+      if (url && url.includes('accounts.google.com')) {
         contents.executeJavaScript(`
-          if (window.PublicKeyCredential) {
-            window.PublicKeyCredential = undefined;
-          }
-          if (navigator.credentials && navigator.credentials.get) {
-            navigator.credentials.get = () => Promise.reject(new DOMException('NotAllowedError', 'NotAllowedError'));
-          }
+          try {
+            if (typeof window !== 'undefined') {
+              window.PublicKeyCredential = undefined;
+            }
+          } catch(e) {}
         `).catch(() => {});
       }
     });
 
     if (contents.getType() === 'webview') {
-      contents.setWindowOpenHandler(() => {
+      contents.setWindowOpenHandler(({ url }) => {
         return {
           action: 'allow',
           overrideBrowserWindowOptions: {
@@ -82,6 +98,7 @@ function setupSession() {
     }
   });
 
+  // Ensure any newly spawned window has clean user agent
   app.on('browser-window-created', (_event, win) => {
     win.webContents.setUserAgent(CLEAN_USER_AGENT);
   });
@@ -107,7 +124,8 @@ function createWindow() {
   const isDev = process.argv.includes('--dev') || process.env.NODE_ENV === 'development';
 
   if (isDev) {
-    mainWindow.loadURL('http://localhost:5173');
+    const devUrl = 'http://localhost:5173';
+    mainWindow.loadURL(devUrl);
   } else {
     const distPath = path.join(__dirname, '../dist/index.html');
     if (fs.existsSync(distPath)) {
@@ -117,13 +135,13 @@ function createWindow() {
     }
   }
 
-  // Jendela khusus Login Google dengan Sandbox aktif & tanpa suntikan navigator.webdriver palsu
+  // Standalone Google Auth Popup with sandbox: true & partition persist:clean_chrome_v3
   ipcMain.handle('open-google-login', async () => {
     return new Promise((resolve) => {
       const authWindow = new BrowserWindow({
-        width: 550,
-        height: 720,
-        title: 'Google Account Sign-In',
+        width: 650,
+        height: 750,
+        title: 'Google Account Sign-In (Mission Control Auth)',
         autoHideMenuBar: true,
         backgroundColor: '#ffffff',
         webPreferences: {
@@ -135,13 +153,102 @@ function createWindow() {
       });
 
       authWindow.webContents.setUserAgent(CLEAN_USER_AGENT);
-      // Gunakan URL login yang langsung mengarah ke pengisian password standar
-      authWindow.loadURL('https://accounts.google.com/ServiceLogin?service=youtube&passive=true&continue=https%3A%2F%2Fwww.youtube.com%2Fsignin%3Faction_handle_signin%3Dtrue%26next%3Dhttps%253A%252F%252Fstudio.youtube.com%252F&hl=id');
+      authWindow.loadURL('https://accounts.google.com/ServiceLogin?hl=id');
 
       authWindow.on('closed', () => {
         resolve({ success: true });
       });
     });
+  });
+
+  // 100% Guaranteed Fallback: Real Browser Cookie Bridge
+  // Injects exported Chrome cookies directly into the Electron session jar
+  ipcMain.handle('import-cookies', async (_event, cookiesJson) => {
+    try {
+      let cookies = [];
+      if (typeof cookiesJson === 'string') {
+        cookies = JSON.parse(cookiesJson);
+      } else if (Array.isArray(cookiesJson)) {
+        cookies = cookiesJson;
+      }
+
+      if (!Array.isArray(cookies) || cookies.length === 0) {
+        return { success: false, error: 'Format JSON cookie tidak valid atau kosong.' };
+      }
+
+      const sessionsToInject = [
+        session.fromPartition(PARTITION_NAME),
+        session.fromPartition('persist:clean_chrome_v2'),
+        session.defaultSession,
+      ];
+
+      let totalSuccess = 0;
+      let totalFailed = 0;
+
+      for (const cookie of cookies) {
+        if (!cookie.name || cookie.value === undefined) continue;
+
+        const rawDomain = (cookie.domain || '').trim();
+        const cleanDomain = rawDomain.replace(/^\./, '');
+        const isSecure = Boolean(cookie.secure);
+        const protocol = isSecure ? 'https' : 'http';
+        const cookiePath = cookie.path || '/';
+        const url = `${protocol}://${cleanDomain || 'google.com'}${cookiePath}`;
+
+        let sameSite = 'unspecified';
+        if (cookie.sameSite) {
+          const s = String(cookie.sameSite).toLowerCase();
+          if (s === 'no_restriction' || s === 'none') sameSite = 'no_restriction';
+          else if (s === 'lax') sameSite = 'lax';
+          else if (s === 'strict') sameSite = 'strict';
+        }
+
+        const cookieDetails = {
+          url,
+          name: cookie.name,
+          value: String(cookie.value),
+          path: cookiePath,
+          secure: isSecure,
+          httpOnly: Boolean(cookie.httpOnly),
+          sameSite,
+        };
+
+        if (rawDomain) {
+          cookieDetails.domain = rawDomain;
+        }
+
+        const expiry = cookie.expirationDate || cookie.expiry;
+        if (expiry && typeof expiry === 'number') {
+          cookieDetails.expirationDate = Math.floor(expiry);
+        }
+
+        for (const targetSes of sessionsToInject) {
+          try {
+            await targetSes.cookies.set(cookieDetails);
+            totalSuccess++;
+          } catch (firstErr) {
+            try {
+              const fallbackDetails = { ...cookieDetails };
+              delete fallbackDetails.domain;
+              await targetSes.cookies.set(fallbackDetails);
+              totalSuccess++;
+            } catch (secondErr) {
+              totalFailed++;
+            }
+          }
+        }
+      }
+
+      return {
+        success: true,
+        count: cookies.length,
+        injected: totalSuccess,
+        failed: totalFailed,
+      };
+    } catch (err) {
+      console.error('Failed to import cookies:', err);
+      return { success: false, error: err.message || 'Gagal memproses JSON cookie.' };
+    }
   });
 
   ipcMain.on('app:reload', () => {

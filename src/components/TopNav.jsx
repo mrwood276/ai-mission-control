@@ -7,12 +7,15 @@ import {
   ShieldCheck, 
   Cpu,
   KeyRound,
-  Loader2
+  Loader2,
+  Cookie
 } from 'lucide-react';
 import { MODES, SESSION_PARTITION } from '../constants';
+import CookieImportModal from './CookieImportModal';
 
 export default function TopNav({ activeMode, setActiveMode, onReloadActive, onReloadAll }) {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [isCookieModalOpen, setIsCookieModalOpen] = useState(false);
 
   const navItems = [
     {
@@ -60,113 +63,132 @@ export default function TopNav({ activeMode, setActiveMode, onReloadActive, onRe
   };
 
   return (
-    <header className="h-14 bg-slate-950/95 border-b border-slate-800/80 px-4 flex items-center justify-between z-50 select-none backdrop-blur shadow-lg flex-shrink-0">
-      {/* Brand / Title */}
-      <div className="flex items-center gap-3 min-w-[220px]">
-        <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-sky-500 shadow-md shadow-indigo-500/20 text-white">
-          <Cpu className="w-5 h-5 animate-pulse" />
-        </div>
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-sm tracking-wider text-slate-100 uppercase">
-              Creator Pipeline
-            </span>
-            <span className="text-[10px] font-semibold tracking-widest px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20">
-              v1.0
-            </span>
+    <>
+      <header className="h-14 bg-slate-950/95 border-b border-slate-800/80 px-4 flex items-center justify-between z-40 select-none backdrop-blur shadow-lg flex-shrink-0">
+        {/* Brand / Title */}
+        <div className="flex items-center gap-3 min-w-[200px]">
+          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-sky-500 shadow-md shadow-indigo-500/20 text-white">
+            <Cpu className="w-5 h-5 animate-pulse" />
           </div>
-          <p className="text-[10px] text-slate-400 font-mono flex items-center gap-1.5">
-            <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
-            Mission Control Active
-          </p>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-sm tracking-wider text-slate-100 uppercase">
+                Creator Pipeline
+              </span>
+              <span className="text-[10px] font-semibold tracking-widest px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20">
+                v1.0
+              </span>
+            </div>
+            <p className="text-[10px] text-slate-400 font-mono flex items-center gap-1.5">
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
+              Mission Control Active
+            </p>
+          </div>
         </div>
-      </div>
 
-      {/* Mode Navigation Tabs */}
-      <nav className="flex items-center gap-1 bg-slate-900/90 p-1 rounded-xl border border-slate-800/80 shadow-inner">
-        {navItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = activeMode === item.id;
+        {/* Mode Navigation Tabs */}
+        <nav className="flex items-center gap-1 bg-slate-900/90 p-1 rounded-xl border border-slate-800/80 shadow-inner">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = activeMode === item.id;
 
-          return (
-            <button
-              key={item.id}
-              onClick={() => setActiveMode(item.id)}
-              className={`group relative flex items-center gap-3 px-4 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 ${
-                isActive
-                  ? `bg-slate-800/95 text-white shadow-md border border-slate-700/60`
-                  : `text-slate-400 hover:text-slate-200 hover:bg-slate-800/40`
-              }`}
-            >
-              <div
-                className={`flex items-center justify-center w-6 h-6 rounded-md transition-colors ${
+            return (
+              <button
+                key={item.id}
+                onClick={() => setActiveMode(item.id)}
+                className={`group relative flex items-center gap-3 px-4 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 ${
                   isActive
-                    ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30'
-                    : 'bg-slate-800 text-slate-400 group-hover:text-slate-300'
+                    ? `bg-slate-800/95 text-white shadow-md border border-slate-700/60`
+                    : `text-slate-400 hover:text-slate-200 hover:bg-slate-800/40`
                 }`}
               >
-                <Icon className="w-3.5 h-3.5" />
-              </div>
-
-              <div className="text-left">
-                <div className="flex items-center gap-1.5">
-                  <span className="font-semibold">{item.title}</span>
-                  {isActive && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse"></span>
-                  )}
+                <div
+                  className={`flex items-center justify-center w-6 h-6 rounded-md transition-colors ${
+                    isActive
+                      ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30'
+                      : 'bg-slate-800 text-slate-400 group-hover:text-slate-300'
+                  }`}
+                >
+                  <Icon className="w-3.5 h-3.5" />
                 </div>
-                <div className="text-[10px] text-slate-500 group-hover:text-slate-400 font-normal">
-                  {item.subtitle}
+
+                <div className="text-left">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-semibold">{item.title}</span>
+                    {isActive && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse"></span>
+                    )}
+                  </div>
+                  <div className="text-[10px] text-slate-500 group-hover:text-slate-400 font-normal">
+                    {item.subtitle}
+                  </div>
                 </div>
-              </div>
 
-              {isActive && (
-                <div className="absolute inset-x-0 -bottom-1 h-0.5 bg-gradient-to-r from-transparent via-sky-400 to-transparent"></div>
-              )}
-            </button>
-          );
-        })}
-      </nav>
+                {isActive && (
+                  <div className="absolute inset-x-0 -bottom-1 h-0.5 bg-gradient-to-r from-transparent via-sky-400 to-transparent"></div>
+                )}
+              </button>
+            );
+          })}
+        </nav>
 
-      {/* Status & Actions */}
-      <div className="flex items-center gap-2.5 min-w-[260px] justify-end">
-        {/* The Ultimate Bypass: Standalone Google Auth Popup */}
-        <button
-          onClick={handleGoogleLogin}
-          disabled={isLoggingIn}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold shadow-md transition-all ${
-            isLoggingIn
-              ? 'bg-amber-600/50 text-amber-200 border border-amber-500/50 cursor-wait animate-pulse'
-              : 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 hover:shadow-orange-500/20 active:scale-95'
-          }`}
-          title="Opens a native Google Auth popup sharing the clean session partition. Sign in there, close it, and all webviews will be signed in without 'browser not secure' blocks!"
-        >
-          {isLoggingIn ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          ) : (
-            <KeyRound className="w-3.5 h-3.5" />
-          )}
-          <span>{isLoggingIn ? 'Popup Active...' : '🔑 Google Login'}</span>
-        </button>
+        {/* Status & Actions */}
+        <div className="flex items-center gap-2 min-w-[320px] justify-end">
+          {/* 100% Guaranteed Fallback: Cookie Importer Modal */}
+          <button
+            onClick={() => setIsCookieModalOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold shadow-md transition-all bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white border border-amber-500/40 hover:shadow-amber-500/20 active:scale-95"
+            title="Import cookies exported from real Chrome (Cookie-Editor / EditThisCookie) for 100% guaranteed login"
+          >
+            <Cookie className="w-3.5 h-3.5 text-amber-200" />
+            <span>🍪 Import Cookies</span>
+          </button>
 
-        {/* Clean Session Partition Badge */}
-        <div 
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-950/40 border border-emerald-800/50 text-[11px] text-emerald-300 font-mono cursor-help"
-          title={`All webviews share partition='${SESSION_PARTITION}' so authenticated sessions are preserved permanently.`}
-        >
-          <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-          <span>{SESSION_PARTITION}</span>
+          {/* Standalone Google Auth Popup */}
+          <button
+            onClick={handleGoogleLogin}
+            disabled={isLoggingIn}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold shadow-md transition-all ${
+              isLoggingIn
+                ? 'bg-slate-800 text-slate-400 border border-slate-700 cursor-wait animate-pulse'
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 hover:border-slate-600 active:scale-95'
+            }`}
+            title="Opens a native Google Auth popup with clean sandbox partition."
+          >
+            {isLoggingIn ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <KeyRound className="w-3.5 h-3.5 text-sky-400" />
+            )}
+            <span>{isLoggingIn ? 'Popup...' : '🔑 Google Login'}</span>
+          </button>
+
+          {/* Clean Session Partition Badge */}
+          <div 
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-950/40 border border-emerald-800/50 text-[11px] text-emerald-300 font-mono cursor-help"
+            title={`All webviews share partition='${SESSION_PARTITION}' so authenticated sessions are preserved permanently.`}
+          >
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+            <span>{SESSION_PARTITION}</span>
+          </div>
+
+          {/* Global Reload Helper */}
+          <button
+            onClick={onReloadActive}
+            className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 hover:border-slate-700 transition"
+            title="Reload active webviews"
+          >
+            <RotateCw className="w-4 h-4" />
+          </button>
         </div>
+      </header>
 
-        {/* Global Reload Helper */}
-        <button
-          onClick={onReloadActive}
-          className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 hover:border-slate-700 transition"
-          title="Reload active webviews"
-        >
-          <RotateCw className="w-4 h-4" />
-        </button>
-      </div>
-    </header>
+      {/* Cookie Importer Modal */}
+      <CookieImportModal
+        isOpen={isCookieModalOpen}
+        onClose={() => setIsCookieModalOpen(false)}
+        onReloadAll={onReloadAll || onReloadActive}
+      />
+    </>
   );
 }

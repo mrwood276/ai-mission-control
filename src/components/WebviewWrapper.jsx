@@ -82,6 +82,10 @@ export default function WebviewWrapper({
     }
   };
 
+  const stealthPreloadUrl = (typeof window !== 'undefined' && window.electronAPI?.stealthPreloadPath)
+    ? `file://${window.electronAPI.stealthPreloadPath.replace(/\\/g, '/')}`
+    : undefined;
+
   return (
     <div 
       id={`container-${id}`}
@@ -153,6 +157,7 @@ export default function WebviewWrapper({
           src={url}
           partition={SESSION_PARTITION}
           useragent={CHROME_USER_AGENT || undefined}
+          preload={stealthPreloadUrl}
           allowpopups="true"
           style={{ width: '100%', height: '100%', display: 'flex' }}
         />
