@@ -2,19 +2,19 @@
 
 A high-performance desktop command center built with **Electron + React (Vite) + Tailwind CSS**, designed to streamline a YouTube content creator's end-to-end AI production pipeline across **YouTube Studio, Claude, ChatGPT, Gemini, and Google Flow**.
 
-## Phase 1 Implementation Summary
+## Security Architecture & Design
 
-- **Desktop Chrome User-Agent & Client Hints Spoofing:** Main process sets Windows Chrome User-Agent and `sec-ch-ua` Client Hints dynamically matching Chromium version on `persist:clean_chrome_v3`.
-- **Stealth & Passkey Suppression:** Suppresses automation detection (`AutomationControlled`) and blocks WebAuthentication/Passkey Bluetooth popups.
-- **Auth Popup Bypass (The Ultimate Google Fix):** Dedicated `🔑 Google Login` button opens a native `BrowserWindow` with `sandbox: true` sharing `persist:clean_chrome_v3` to complete authentication cleanly without `<webview>` guest detection blocks.
-- **Zero-Unmount Webview Architecture:** All 5 `<webview>` instances are mounted continuously in the DOM. Switching between Workspace Modes only updates CSS `flex` / `hidden` and visual flex `order`, ensuring active chats and background Google Flow render tasks are never interrupted.
-- **Top Navigation Bar:** Seamless switching between the 3 Workspace Modes with active mode indicators, Google Auth button, partition badges, and reload actions.
-- **Bottom Status & Quota Bar:** Status monitors for Claude Free Tier cooldowns, ChatGPT availability, Gemini prompt session loads (0/4), and session persistence.
-- **Persistent Partition:** Uses `partition="persist:clean_chrome_v3"` across all webviews to retain cookies and logins indefinitely.
+- **Least-Privilege IPC Bridge:** The renderer context is strictly isolated (`contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`). Only audited, frozen APIs (`openExternal`, `reloadApp`) are exposed via `contextBridge`. IPC handlers validate sender webContents ownership, URL structure, and domain allowlists.
+- **Explicit Destination Allowlists:** External links and popups are strictly validated against an approved service domain allowlist (`youtube.com`, `google.com`, `claude.ai`, `anthropic.com`, `chatgpt.com`, `openai.com`, `labs.google`). Disallowed schemes (e.g. `javascript:`, `file:`, `data:`) and unexpected external destinations are rejected.
+- **Origin-Restricted Permissions:** Permission requests are evaluated per-origin. Broad permissions (`geolocation`, `clipboard-read`, `notifications`) are denied by default; media/audio input permissions are granted only to verified AI service domains for voice prompting.
+- **Webview Isolation:** Guest webviews run sandboxed with remote Node integration disabled, web security enforced, and unauthorized renderer preloads stripped at attachment time.
+- **Persistent Session Partition:** Uses `partition="persist:clean_chrome_v3"` across webviews so legitimate authenticated sessions and preferences persist across restarts.
+- **No Identity Spoofing or Secret Circumvention:** Does not tamper with browser fingerprint headers (`sec-ch-ua`, User-Agent spoofing) or automation flags, and does not extract, import, or store third-party authentication cookies or session secrets.
 
-### ⚠️ Panduan & Catatan Keamanan Login
-- **Google Login di Embedded Browser:** Google dapat memblokir percobaan login langsung di browser embedded/webview kapan saja (*"This browser or app may not be secure"*). Jalur paling andal dan stabil adalah menggunakan tombol **🍪 Import Cookies** (ekspor cookies dari browser Google Chrome asli).
-- **Claude & ChatGPT:** Disarankan menggunakan login langsung dengan email / magic link, atau gunakan fitur Cookie Import jika akun Anda terhubung lewat Google SSO.
+### Authentication & Supported Sign-In Flows
+
+- **Claude & ChatGPT:** Support direct in-webview authentication using standard email, password, or magic link sign-in flows. Sessions are preserved in the persistent partition.
+- **Google Services (YouTube Studio, Gemini, Google Flow):** Google restricts sign-in from embedded Chromium / Electron webviews under its secure browser policy (*"This browser or app may not be secure"*). AI Mission Control provides one-click ordinary browser navigation alternatives to open these services in your default system browser when embedded authentication is restricted.
 
 ---
 
@@ -46,8 +46,13 @@ npm install
 npm run dev
 ```
 
-### 3. Build & Run Production Version
-> **Penting:** Selalu jalankan `npm run build` sebelum `npm start`. Tanpa folder `dist/`, aplikasi akan fallback mencari `http://localhost:5173` dan menampilkan layar kosong jika server Vite dev tidak berjalan.
+### 3. Run Automated Tests
+```bash
+npm test
+```
+
+### 4. Build & Run Production Version
+> **Note:** Run `npm run build` before `npm start` to generate the production client bundle in `dist/`.
 
 ```bash
 npm run build

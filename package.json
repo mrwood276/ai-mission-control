@@ -9,6 +9,7 @@
     "dev": "concurrently -k -p \"[{name}]\" -n \"Vite,Electron\" -c \"cyan.bold,green.bold\" \"vite\" \"npm run dev:electron\"",
     "build:vite": "vite build",
     "build": "vite build",
+    "test": "node --test test/**/*.test.js",
     "start": "electron ."
   },
   "dependencies": {

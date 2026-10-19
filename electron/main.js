@@ -1,24 +1,15 @@
 const { app, BrowserWindow, session, ipcMain, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
-
-const { pathToFileURL } = require('url');
-
-// 1. Hide automation flags via native engine switch
-app.commandLine.appendSwitch('disable-blink-features', 'AutomationControlled');
-
-// 2. Derive clean desktop User-Agent and sec-ch-ua dynamically from actual Chromium version (Chrome 132 in Electron 34)
-const chromeVersion = process.versions.chrome || '132.0.0.0';
-const majorVersion = chromeVersion.split('.')[0] || '132';
-
-const CLEAN_USER_AGENT =
-  `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`;
+const {
+  validateExternalUrl,
+  isTrustedSender,
+  isAllowedPermission,
+} = require('./security');
 
 const PARTITION_NAME = 'persist:clean_chrome_v3';
-const stealthPreloadPath = path.join(__dirname, 'preload-stealth.js');
-const stealthPreloadUrl = pathToFileURL(stealthPreloadPath).href;
 
-app.userAgentFallback = CLEAN_USER_AGENT;
+let mainWindow = null;
 
 function setupSession() {
   const targetSessions = [
@@ -27,333 +18,104 @@ function setupSession() {
   ];
 
   targetSessions.forEach((ses) => {
-    ses.setUserAgent(CLEAN_USER_AGENT);
-
-    const ALLOWED_PERMISSIONS = new Set([
-      'clipboard-read',
-      'clipboard-sanitized-write',
-      'fullscreen',
-      'notifications',
-      'media',
-    ]);
-
-    ses.setPermissionRequestHandler((_webContents, permission, callback) => {
-      callback(ALLOWED_PERMISSIONS.has(permission));
+    // Apply least-privilege permission policy with origin validation
+    ses.setPermissionRequestHandler((webContents, permission, callback, details) => {
+      const requestingUrl = details?.requestingUrl || webContents?.getURL() || '';
+      callback(isAllowedPermission(permission, requestingUrl));
     });
 
-    ses.setPermissionCheckHandler((_webContents, permission) => {
-      return ALLOWED_PERMISSIONS.has(permission);
-    });
-
-    // Intercept headers:
-    // - Explicitly set dynamic Chromium version User-Agent & sec-ch-ua
-    // - Remove Google app signature (X-Client-Data)
-    ses.webRequest.onBeforeSendHeaders((details, callback) => {
-      details.requestHeaders['User-Agent'] = CLEAN_USER_AGENT;
-      details.requestHeaders['sec-ch-ua'] = `"Google Chrome";v="${majorVersion}", "Chromium";v="${majorVersion}", "Not_A Brand";v="24"`;
-      details.requestHeaders['sec-ch-ua-mobile'] = '?0';
-      details.requestHeaders['sec-ch-ua-platform'] = '"Windows"';
-      delete details.requestHeaders['X-Client-Data'];
-      callback({ cancel: false, requestHeaders: details.requestHeaders });
+    ses.setPermissionCheckHandler((webContents, permission, requestingOrigin) => {
+      const url = requestingOrigin || webContents?.getURL() || '';
+      return isAllowedPermission(permission, url);
     });
   });
 
-  // ONLY register deep preload-stealth script on the webview partition session
-  // NEVER on defaultSession, because defaultSession is used by the main application window (which needs preload.js)
+  // Ensure default and webview partitions do not have unexpected preloads
   try {
-    const webviewSession = session.fromPartition(PARTITION_NAME);
-    if (typeof webviewSession.setPreloads === 'function') {
-      webviewSession.setPreloads([stealthPreloadPath]);
-    }
-    // Ensure defaultSession does not have stealthPreload overriding the mainWindow preload
     session.defaultSession.setPreloads([]);
+    const webviewSession = session.fromPartition(PARTITION_NAME);
+    webviewSession.setPreloads([]);
   } catch (e) {
-    console.warn('Could not set preloads on webview partition session:', e.message);
+    console.warn('[Session] Warning setting preloads:', e.message);
   }
-
-  app.on('web-contents-created', (_event, contents) => {
-    if (contents.getType() === 'webview') {
-      contents.setWindowOpenHandler(({ url }) => {
-        return {
-          action: 'allow',
-          overrideBrowserWindowOptions: {
-            width: 650,
-            height: 750,
-            autoHideMenuBar: true,
-            webPreferences: {
-              partition: PARTITION_NAME,
-              nodeIntegration: false,
-              contextIsolation: true,
-              sandbox: true,
-            },
-          },
-        };
-      });
-    }
-  });
-
-  // Ensure any newly spawned window has clean user agent
-  app.on('browser-window-created', (_event, win) => {
-    win.webContents.setUserAgent(CLEAN_USER_AGENT);
-  });
 }
 
 function setupIpcHandlers() {
-  ipcMain.on('get-stealth-preload-url', (event) => {
-    event.returnValue = stealthPreloadUrl;
-  });
-
-  // Standalone Google Auth Popup with sandbox: true & partition persist:clean_chrome_v3
-  ipcMain.handle('open-google-login', async () => {
-    return new Promise((resolve) => {
-      let isResolved = false;
-      let loadError = null;
-
-      const authWindow = new BrowserWindow({
-        width: 650,
-        height: 750,
-        title: 'Google Account Sign-In (Mission Control Auth)',
-        autoHideMenuBar: true,
-        backgroundColor: '#ffffff',
-        webPreferences: {
-          partition: PARTITION_NAME,
-          nodeIntegration: false,
-          contextIsolation: true,
-          sandbox: true,
-        },
-      });
-
-      authWindow.webContents.setUserAgent(CLEAN_USER_AGENT);
-
-      authWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, _validatedURL, isMainFrame) => {
-        // Ignore ERR_ABORTED (-3) as it happens normally on redirect
-        if (isMainFrame && errorCode !== -3) {
-          loadError = `${errorDescription} (${errorCode})`;
-        }
-      });
-
-      authWindow.loadURL('https://accounts.google.com/ServiceLogin?hl=id');
-
-      authWindow.on('closed', async () => {
-        if (isResolved) return;
-        isResolved = true;
-        try {
-          const ses = session.fromPartition(PARTITION_NAME);
-          const sidCookies = await ses.cookies.get({ name: 'SID' });
-          const loggedIn = Array.isArray(sidCookies) && sidCookies.length > 0;
-          if (loadError && !loggedIn) {
-            resolve({ success: false, error: loadError, loggedIn: false });
-          } else {
-            resolve({ success: true, loggedIn });
-          }
-        } catch (err) {
-          resolve({ success: false, error: err.message, loggedIn: false });
-        }
-      });
-    });
-  });
-
-  // 100% Guaranteed Fallback: Real Browser Cookie Bridge
-  // Injects exported Chrome cookies directly into the Electron session jar
-  ipcMain.handle('import-cookies', async (_event, cookiesJson) => {
-    try {
-      if (typeof cookiesJson === 'string') {
-        if (cookiesJson.length > 5 * 1024 * 1024) {
-          return { success: false, error: 'Ukuran JSON cookie terlalu besar (maks 5MB).' };
-        }
-      }
-
-      let cookies = [];
-      if (typeof cookiesJson === 'string') {
-        try {
-          cookies = JSON.parse(cookiesJson);
-        } catch (e) {
-          return { success: false, error: 'Format JSON tidak valid: ' + e.message };
-        }
-      } else if (Array.isArray(cookiesJson)) {
-        cookies = cookiesJson;
-      }
-
-      if (!Array.isArray(cookies) || cookies.length === 0) {
-        return { success: false, error: 'Format JSON cookie tidak valid atau kosong (harus berupa array).' };
-      }
-
-      const ses = session.fromPartition(PARTITION_NAME);
-      const defaultExpirationDate = Math.floor(Date.now() / 1000) + (180 * 24 * 3600); // 180 days default
-      const failedCookies = [];
-      let injectedCount = 0;
-
-      for (const cookie of cookies) {
-        if (!cookie || typeof cookie !== 'object') {
-          failedCookies.push({ name: 'unknown', reason: 'Objek cookie tidak valid' });
-          continue;
-        }
-
-        const name = typeof cookie.name === 'string' ? cookie.name.trim() : '';
-        if (!name) {
-          failedCookies.push({ name: 'empty', reason: 'Nama cookie kosong atau bukan string' });
-          continue;
-        }
-
-        let value = '';
-        if (typeof cookie.value === 'string') {
-          value = cookie.value;
-        } else if (cookie.value !== undefined && cookie.value !== null) {
-          value = String(cookie.value);
-        }
-
-        const rawDomain = typeof cookie.domain === 'string' ? cookie.domain.trim() : '';
-        const cleanDomain = rawDomain.replace(/^\./, '');
-        const isGoogleOrYoutube = /(^|\.)(google\.[a-z.]+|youtube\.com)$/i.test(cleanDomain) || cleanDomain.includes('google') || cleanDomain.includes('youtube');
-
-        let isSecure = Boolean(cookie.secure);
-        if (name.startsWith('__Secure-') || name.startsWith('__Host-')) {
-          isSecure = true;
-        }
-
-        let protocol = 'https';
-        if (!isSecure && !isGoogleOrYoutube) {
-          protocol = 'http';
-        } else {
-          isSecure = true;
-        }
-
-        let cookiePath = typeof cookie.path === 'string' && cookie.path.startsWith('/') ? cookie.path : '/';
-        if (name.startsWith('__Host-')) {
-          cookiePath = '/';
-        }
-
-        const urlDomain = cleanDomain || 'google.com';
-        const url = `${protocol}://${urlDomain}${cookiePath}`;
-
-        let sameSite = 'unspecified';
-        if (cookie.sameSite) {
-          const s = String(cookie.sameSite).toLowerCase();
-          if (s === 'no_restriction' || s === 'none') sameSite = 'no_restriction';
-          else if (s === 'lax') sameSite = 'lax';
-          else if (s === 'strict') sameSite = 'strict';
-        }
-
-        const cookieDetails = {
-          url,
-          name,
-          value,
-          path: cookiePath,
-          secure: isSecure,
-          httpOnly: Boolean(cookie.httpOnly),
-          sameSite,
-        };
-
-        const isHostOnly = Boolean(cookie.hostOnly) || name.startsWith('__Host-');
-        if (!isHostOnly && rawDomain) {
-          cookieDetails.domain = rawDomain;
-        }
-
-        const expiry = cookie.expirationDate || cookie.expiry;
-        if (expiry && typeof expiry === 'number' && !isNaN(expiry) && expiry > 0) {
-          cookieDetails.expirationDate = Math.floor(expiry);
-        } else {
-          cookieDetails.expirationDate = defaultExpirationDate;
-        }
-
-        try {
-          await ses.cookies.set(cookieDetails);
-          injectedCount++;
-        } catch (firstErr) {
-          if (cookieDetails.domain) {
-            try {
-              const fallbackDetails = { ...cookieDetails };
-              delete fallbackDetails.domain;
-              await ses.cookies.set(fallbackDetails);
-              injectedCount++;
-              continue;
-            } catch (secondErr) {
-              failedCookies.push({ name, reason: secondErr.message || firstErr.message });
-              continue;
-            }
-          }
-          failedCookies.push({ name, reason: firstErr.message });
-        }
-      }
-
-      try {
-        await ses.cookies.flushStore();
-      } catch (flushErr) {
-        console.warn('[Session] cookies.flushStore error:', flushErr);
-      }
-
-      let googleLoginDetected = false;
-      try {
-        const googleCookies = await ses.cookies.get({ domain: '.google.com' });
-        googleLoginDetected = googleCookies.some(c => c.name === 'SID' || c.name === '__Secure-1PSID');
-        if (!googleLoginDetected) {
-          const allCookies = await ses.cookies.get({});
-          googleLoginDetected = allCookies.some(
-            c => (c.name === 'SID' || c.name === '__Secure-1PSID') && c.domain && c.domain.includes('google')
-          );
-        }
-      } catch (checkErr) {
-        console.warn('[Session] Could not verify Google login cookies:', checkErr);
-      }
-
-      return {
-        success: true,
-        count: cookies.length,
-        injected: injectedCount,
-        failed: failedCookies.length,
-        failedCookies,
-        googleLoginDetected,
-      };
-    } catch (err) {
-      console.error('Failed to import cookies:', err);
-      return { success: false, error: err.message || 'Gagal memproses JSON cookie.' };
+  // Hardened open-external handler: validates sender trust, URL syntax, and destination allowlist
+  ipcMain.handle('open-external', async (event, targetUrl) => {
+    if (!mainWindow || !isTrustedSender(event.sender, mainWindow.webContents)) {
+      return { success: false, error: 'Unauthorized IPC sender' };
     }
-  });
 
-  ipcMain.handle('check-google-auth', async () => {
-    try {
-      const ses = session.fromPartition(PARTITION_NAME);
-      const googleCookies = await ses.cookies.get({ domain: '.google.com' });
-      const hasSid = googleCookies.some(c => c.name === 'SID' || c.name === '__Secure-1PSID');
-      if (hasSid) return { loggedIn: true };
-
-      const allCookies = await ses.cookies.get({});
-      const hasAny = allCookies.some(
-        c => (c.name === 'SID' || c.name === '__Secure-1PSID') && c.domain && c.domain.includes('google')
-      );
-      return { loggedIn: hasAny };
-    } catch (e) {
-      return { loggedIn: false, error: e.message };
+    const validation = validateExternalUrl(targetUrl);
+    if (!validation.ok) {
+      return { success: false, error: validation.error };
     }
-  });
 
-  ipcMain.handle('open-external', async (_event, targetUrl) => {
     try {
-      if (typeof targetUrl !== 'string') {
-        return { success: false, error: 'URL harus berupa string' };
-      }
-      const parsed = new URL(targetUrl);
-      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-        return { success: false, error: 'Hanya protokol http/https yang diizinkan' };
-      }
-      await shell.openExternal(targetUrl);
+      await shell.openExternal(validation.url);
       return { success: true };
     } catch (err) {
-      console.error('[IPC] Failed to open external URL:', err);
-      return { success: false, error: err.message };
+      console.error('[IPC] Failed to open external URL:', err.message);
+      return { success: false, error: 'Failed to launch external browser' };
     }
   });
 
+  // Hardened app reload: strictly authorized to trusted main window
   ipcMain.on('app:reload', (event) => {
-    const win = BrowserWindow.fromWebContents(event.sender);
-    if (win) {
-      win.reload();
+    if (mainWindow && isTrustedSender(event.sender, mainWindow.webContents)) {
+      mainWindow.reload();
+    }
+  });
+}
+
+function setupWebContentsSecurity() {
+  app.on('web-contents-created', (_event, contents) => {
+    // Intercept webview attachment to strictly enforce secure webPreferences
+    contents.on('will-attach-webview', (webviewEvent, webPreferences) => {
+      // Strip any preload script attached by renderer to prevent untrusted script injection
+      delete webPreferences.preload;
+      delete webPreferences.preloadURL;
+
+      // Enforce strict isolation and sandboxing
+      webPreferences.nodeIntegration = false;
+      webPreferences.nodeIntegrationInSubFrames = false;
+      webPreferences.contextIsolation = true;
+      webPreferences.sandbox = true;
+      webPreferences.webSecurity = true;
+      webPreferences.allowRunningInsecureContent = false;
+    });
+
+    if (contents.getType() === 'webview') {
+      // Prevent webviews from navigating to dangerous non-web protocols (file:, javascript:, data:)
+      contents.on('will-navigate', (navEvent, navigationUrl) => {
+        try {
+          const parsed = new URL(navigationUrl);
+          if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+            navEvent.preventDefault();
+          }
+        } catch {
+          navEvent.preventDefault();
+        }
+      });
+
+      // Secure popup handling for webviews
+      contents.setWindowOpenHandler(({ url }) => {
+        const validation = validateExternalUrl(url);
+        if (validation.ok) {
+          // Open allowed destinations in external browser rather than unconstrained Electron windows
+          shell.openExternal(validation.url).catch((err) => {
+            console.warn('[Webview] Failed to open external popup:', err.message);
+          });
+        }
+        return { action: 'deny' };
+      });
     }
   });
 }
 
 function createWindow() {
-  const mainWindow = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1600,
     height: 960,
     minWidth: 1200,
@@ -364,29 +126,53 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      sandbox: true,
       webviewTag: true,
       preload: path.join(__dirname, 'preload.js'),
     },
   });
 
   const isDev = process.argv.includes('--dev') || process.env.NODE_ENV === 'development';
+  const expectedDevOrigin = 'http://localhost:5173';
+
+  // Prevent main window from navigating away from the local application
+  mainWindow.webContents.on('will-navigate', (event, navigationUrl) => {
+    if (isDev) {
+      if (!navigationUrl.startsWith(expectedDevOrigin)) {
+        event.preventDefault();
+      }
+    } else {
+      if (!navigationUrl.startsWith('file:')) {
+        event.preventDefault();
+      }
+    }
+  });
+
+  // Deny arbitrary new windows from main application window
+  mainWindow.webContents.setWindowOpenHandler(() => {
+    return { action: 'deny' };
+  });
 
   if (isDev) {
-    const devUrl = 'http://localhost:5173';
-    mainWindow.loadURL(devUrl);
+    mainWindow.loadURL(expectedDevOrigin);
   } else {
     const distPath = path.join(__dirname, '../dist/index.html');
     if (fs.existsSync(distPath)) {
       mainWindow.loadFile(distPath);
     } else {
-      mainWindow.loadURL('http://localhost:5173');
+      mainWindow.loadURL(expectedDevOrigin);
     }
   }
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
 }
 
 app.whenReady().then(() => {
   setupSession();
   setupIpcHandlers();
+  setupWebContentsSecurity();
   createWindow();
 
   app.on('activate', () => {

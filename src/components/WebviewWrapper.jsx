@@ -5,10 +5,9 @@ import {
   ArrowRight, 
   ExternalLink, 
   Loader2,
-  Lock,
   Globe
 } from 'lucide-react';
-import { CHROME_USER_AGENT, SESSION_PARTITION } from '../constants';
+import { SESSION_PARTITION } from '../constants';
 
 export default function WebviewWrapper({
   id,
@@ -81,13 +80,9 @@ export default function WebviewWrapper({
     if (window.electronAPI && typeof window.electronAPI.openExternal === 'function') {
       window.electronAPI.openExternal(liveUrl);
     } else {
-      window.open(liveUrl, '_blank');
+      window.open(liveUrl, '_blank', 'noopener,noreferrer');
     }
   };
-
-  const isElectron = typeof window !== 'undefined' && Boolean(window.electronAPI?.isElectron);
-  const stealthPreloadUrl = typeof window !== 'undefined' ? window.electronAPI?.stealthPreloadUrl : undefined;
-  const canRenderWebview = !isElectron || Boolean(stealthPreloadUrl);
 
   return (
     <div 
@@ -154,23 +149,14 @@ export default function WebviewWrapper({
 
       {/* Persistent Electron Webview Instance */}
       <div className="flex-1 w-full h-full relative bg-slate-950">
-        {canRenderWebview ? (
-          <webview
-            id={id}
-            ref={webviewRef}
-            src={url}
-            partition={SESSION_PARTITION}
-            useragent={CHROME_USER_AGENT || undefined}
-            preload={stealthPreloadUrl}
-            allowpopups="true"
-            style={{ width: '100%', height: '100%', display: 'flex' }}
-          />
-        ) : (
-          <div className="flex items-center justify-center h-full text-slate-500 text-xs">
-            <Loader2 className="w-4 h-4 animate-spin mr-2 text-sky-400" />
-            <span>Memuat konfigurasi webview...</span>
-          </div>
-        )}
+        <webview
+          id={id}
+          ref={webviewRef}
+          src={url}
+          partition={SESSION_PARTITION}
+          allowpopups="true"
+          style={{ width: '100%', height: '100%', display: 'flex' }}
+        />
       </div>
     </div>
   );

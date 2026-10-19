@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { 
   BarChart3, 
   Sparkles, 
@@ -6,29 +6,16 @@ import {
   RotateCw, 
   ShieldCheck, 
   Cpu,
-  KeyRound,
-  Loader2,
-  Cookie,
+  Info,
+  ExternalLink,
+  X,
   CheckCircle2,
-  AlertCircle,
-  X
+  AlertTriangle
 } from 'lucide-react';
-import { MODES, SESSION_PARTITION } from '../constants';
-import CookieImportModal from './CookieImportModal';
+import { MODES, SESSION_PARTITION, WEBVIEWS } from '../constants';
 
 export default function TopNav({ activeMode, setActiveMode, onReloadActive, onReloadAll }) {
-  const [isLoggingIn, setIsLoggingIn] = useState(false);
-  const [isCookieModalOpen, setIsCookieModalOpen] = useState(false);
-  const [authStatus, setAuthStatus] = useState(null);
-
-  useEffect(() => {
-    if (authStatus) {
-      const timer = setTimeout(() => {
-        setAuthStatus(null);
-      }, 7000);
-      return () => clearTimeout(timer);
-    }
-  }, [authStatus]);
+  const [isAuthHelpOpen, setIsAuthHelpOpen] = useState(false);
 
   const navItems = [
     {
@@ -54,49 +41,11 @@ export default function TopNav({ activeMode, setActiveMode, onReloadActive, onRe
     },
   ];
 
-  const handleGoogleLogin = async () => {
-    if (window.electronAPI && window.electronAPI.openGoogleLogin) {
-      setIsLoggingIn(true);
-      setAuthStatus(null);
-      try {
-        const result = await window.electronAPI.openGoogleLogin();
-        if (result && result.loggedIn) {
-          setAuthStatus({
-            type: 'success',
-            message: 'Login Google berhasil! Sesi login terdeteksi dan tersimpan.',
-          });
-          if (onReloadAll) {
-            onReloadAll();
-          } else if (onReloadActive) {
-            onReloadActive();
-          }
-        } else if (result && result.success === false) {
-          setAuthStatus({
-            type: 'error',
-            message: result.error ? `Gagal memuat: ${result.error}` : 'Login Google gagal dimuat.',
-          });
-        } else {
-          setAuthStatus({
-            type: 'warning',
-            message: 'Popup login ditutup tanpa mendeteksi sesi Google aktif (SID). Jika diblokir Google, gunakan Import Cookies.',
-          });
-        }
-      } catch (err) {
-        console.error('Failed to run Google login popup:', err);
-        setAuthStatus({
-          type: 'error',
-          message: err.message || 'Terjadi kesalahan saat membuka login Google.',
-        });
-      } finally {
-        setIsLoggingIn(false);
-      }
+  const handleOpenExternal = (url) => {
+    if (window.electronAPI && typeof window.electronAPI.openExternal === 'function') {
+      window.electronAPI.openExternal(url);
     } else {
-      const authUrl = 'https://accounts.google.com/ServiceLogin?hl=id';
-      if (window.electronAPI && typeof window.electronAPI.openExternal === 'function') {
-        window.electronAPI.openExternal(authUrl);
-      } else {
-        window.open(authUrl, '_blank', 'width=650,height=750');
-      }
+      window.open(url, '_blank', 'noopener,noreferrer');
     }
   };
 
@@ -172,39 +121,20 @@ export default function TopNav({ activeMode, setActiveMode, onReloadActive, onRe
 
         {/* Status & Actions */}
         <div className="flex items-center gap-2 min-w-[320px] justify-end">
-          {/* 100% Guaranteed Fallback: Cookie Importer Modal */}
+          {/* Sign-In & Authentication Guidance */}
           <button
-            onClick={() => setIsCookieModalOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold shadow-md transition-all bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white border border-amber-500/40 hover:shadow-amber-500/20 active:scale-95"
-            title="Import cookies exported from real Chrome (Cookie-Editor / EditThisCookie) for 100% guaranteed login"
+            onClick={() => setIsAuthHelpOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold shadow-md transition-all bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 hover:border-slate-600 active:scale-95"
+            title="View supported sign-in flows and external browser alternatives"
           >
-            <Cookie className="w-3.5 h-3.5 text-amber-200" />
-            <span>🍪 Import Cookies</span>
+            <Info className="w-3.5 h-3.5 text-sky-400" />
+            <span>Sign-In Info</span>
           </button>
 
-          {/* Standalone Google Auth Popup */}
-          <button
-            onClick={handleGoogleLogin}
-            disabled={isLoggingIn}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold shadow-md transition-all ${
-              isLoggingIn
-                ? 'bg-slate-800 text-slate-400 border border-slate-700 cursor-wait animate-pulse'
-                : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 hover:border-slate-600 active:scale-95'
-            }`}
-            title="Opens a native Google Auth popup with clean sandbox partition."
-          >
-            {isLoggingIn ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <KeyRound className="w-3.5 h-3.5 text-sky-400" />
-            )}
-            <span>{isLoggingIn ? 'Popup...' : '🔑 Google Login'}</span>
-          </button>
-
-          {/* Clean Session Partition Badge */}
+          {/* Session Partition Badge */}
           <div 
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-950/40 border border-emerald-800/50 text-[11px] text-emerald-300 font-mono cursor-help"
-            title={`All webviews share partition='${SESSION_PARTITION}' so authenticated sessions are preserved permanently.`}
+            title={`Persistent partition: '${SESSION_PARTITION}'. Session data and local storage remain isolated and preserved.`}
           >
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
             <span>{SESSION_PARTITION}</span>
@@ -221,36 +151,110 @@ export default function TopNav({ activeMode, setActiveMode, onReloadActive, onRe
         </div>
       </header>
 
-      {/* Toast Notification for Google Login */}
-      {authStatus && (
-        <div className="fixed top-16 right-4 z-50 max-w-md animate-in fade-in slide-in-from-top-2 duration-200">
-          <div className={`p-3 rounded-xl border shadow-xl flex items-start gap-2.5 text-xs ${
-            authStatus.type === 'success'
-              ? 'bg-emerald-950/90 border-emerald-800 text-emerald-200'
-              : authStatus.type === 'error'
-              ? 'bg-rose-950/90 border-rose-800 text-rose-200'
-              : 'bg-amber-950/90 border-amber-800 text-amber-200'
-          }`}>
-            {authStatus.type === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />}
-            {authStatus.type === 'error' && <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0 mt-0.5" />}
-            {authStatus.type === 'warning' && <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />}
-            <span className="flex-1 leading-relaxed">{authStatus.message}</span>
-            <button
-              onClick={() => setAuthStatus(null)}
-              className="p-1 rounded hover:bg-white/10 text-slate-400 hover:text-white transition"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
+      {/* Sign-In & Authentication Guidance Modal */}
+      {isAuthHelpOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/60">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-lg bg-sky-500/10 border border-sky-500/20 text-sky-400">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-sm text-slate-100">
+                    Authentication & Sign-In Guidance
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Supported login flows and security limitations
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsAuthHelpOpen(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 space-y-4 overflow-y-auto text-xs text-slate-300">
+              {/* Claude & ChatGPT Direct Flow */}
+              <div className="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2">
+                <div className="flex items-center gap-2 font-medium text-emerald-400">
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Supported Embedded Flows (Claude & ChatGPT)</span>
+                </div>
+                <p className="text-slate-400 leading-relaxed">
+                  Claude (<span className="text-slate-200 font-mono">claude.ai</span>) and ChatGPT (<span className="text-slate-200 font-mono">chatgpt.com</span>) support direct in-webview sign-in using email, password, or magic link authentication. Their session states are automatically stored in the persistent desktop session partition.
+                </p>
+              </div>
+
+              {/* Google Embedded Browser Limitation */}
+              <div className="p-3.5 rounded-xl bg-amber-950/20 border border-amber-800/40 space-y-2">
+                <div className="flex items-center gap-2 font-medium text-amber-300">
+                  <AlertTriangle className="w-4 h-4 text-amber-400" />
+                  <span>Google Embedded Sign-In Limitation</span>
+                </div>
+                <p className="text-slate-300 leading-relaxed">
+                  Google enforces an anti-embedded-browser security policy (&quot;This browser or app may not be secure&quot;) that restricts signing into Google Accounts from within Electron webviews. AI Mission Control does not circumvent or tamper with third-party authentication protections.
+                </p>
+              </div>
+
+              {/* External Browser Alternatives */}
+              <div className="space-y-2">
+                <span className="font-medium text-slate-200">
+                  Ordinary Browser Alternatives
+                </span>
+                <p className="text-slate-400">
+                  If an embedded flow is blocked by service policy, use your regular system browser to access the service:
+                </p>
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <button
+                    onClick={() => handleOpenExternal(WEBVIEWS.YOUTUBE.url)}
+                    className="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700/80 border border-slate-700 text-left transition"
+                  >
+                    <span className="font-medium text-slate-200">{WEBVIEWS.YOUTUBE.name}</span>
+                    <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
+                  </button>
+                  <button
+                    onClick={() => handleOpenExternal(WEBVIEWS.GEMINI.url)}
+                    className="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700/80 border border-slate-700 text-left transition"
+                  >
+                    <span className="font-medium text-slate-200">{WEBVIEWS.GEMINI.name}</span>
+                    <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
+                  </button>
+                  <button
+                    onClick={() => handleOpenExternal(WEBVIEWS.CLAUDE.url)}
+                    className="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700/80 border border-slate-700 text-left transition"
+                  >
+                    <span className="font-medium text-slate-200">{WEBVIEWS.CLAUDE.name}</span>
+                    <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
+                  </button>
+                  <button
+                    onClick={() => handleOpenExternal(WEBVIEWS.CHATGPT.url)}
+                    className="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700/80 border border-slate-700 text-left transition"
+                  >
+                    <span className="font-medium text-slate-200">{WEBVIEWS.CHATGPT.name}</span>
+                    <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-5 py-3 border-t border-slate-800 bg-slate-950/60 flex justify-end">
+              <button
+                onClick={() => setIsAuthHelpOpen(false)}
+                className="px-4 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium transition"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}
-
-      {/* Cookie Importer Modal */}
-      <CookieImportModal
-        isOpen={isCookieModalOpen}
-        onClose={() => setIsCookieModalOpen(false)}
-        onReloadAll={onReloadAll || onReloadActive}
-      />
     </>
   );
 }

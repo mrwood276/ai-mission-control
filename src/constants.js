@@ -1,10 +1,3 @@
-export const CHROME_USER_AGENT =
-  (typeof window !== 'undefined' && window.electronAPI?.userAgent)
-    ? window.electronAPI.userAgent
-    : (typeof navigator !== 'undefined'
-        ? navigator.userAgent.replace(/Electron\/[^\s]+\s?/g, '')
-        : '');
-
 export const SESSION_PARTITION = 'persist:clean_chrome_v3';
 
 export const MODES = {
