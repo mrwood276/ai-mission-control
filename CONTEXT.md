@@ -7,7 +7,7 @@ A desktop application built with Electron, React (Vite), and Tailwind CSS design
 - Framework: Electron + React (Vite) + Tailwind CSS
 - Icons: Lucide-React
 - State Management & Storage: React State + localStorage (for saving Global Rules, Scene Cards, and Quota Timers)
-- Webviews: Electron `<webview>` with `partition="persist:main"` so login sessions and cookies are permanently saved.
+- Webviews: Electron `<webview>` with `partition="persist:clean_chrome_v3"` so login sessions and cookies are permanently saved.
 
 ## Core Workflow & Layout (3 Workspace Modes)
 1. **Mode 1: Analytics & Ideation**
