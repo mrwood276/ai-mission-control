@@ -129,6 +129,9 @@ function createWindow() {
   // Standalone Google Auth Popup with sandbox: true & partition persist:clean_chrome_v3
   ipcMain.handle('open-google-login', async () => {
     return new Promise((resolve) => {
+      let isResolved = false;
+      let loadError = null;
+
       const authWindow = new BrowserWindow({
         width: 650,
         height: 750,
@@ -144,10 +147,31 @@ function createWindow() {
       });
 
       authWindow.webContents.setUserAgent(CLEAN_USER_AGENT);
+
+      authWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, _validatedURL, isMainFrame) => {
+        // Ignore ERR_ABORTED (-3) as it happens normally on redirect
+        if (isMainFrame && errorCode !== -3) {
+          loadError = `${errorDescription} (${errorCode})`;
+        }
+      });
+
       authWindow.loadURL('https://accounts.google.com/ServiceLogin?hl=id');
 
-      authWindow.on('closed', () => {
-        resolve({ success: true });
+      authWindow.on('closed', async () => {
+        if (isResolved) return;
+        isResolved = true;
+        try {
+          const ses = session.fromPartition(PARTITION_NAME);
+          const sidCookies = await ses.cookies.get({ name: 'SID' });
+          const loggedIn = Array.isArray(sidCookies) && sidCookies.length > 0;
+          if (loadError && !loggedIn) {
+            resolve({ success: false, error: loadError, loggedIn: false });
+          } else {
+            resolve({ success: true, loggedIn });
+          }
+        } catch (err) {
+          resolve({ success: false, error: err.message, loggedIn: false });
+        }
       });
     });
   });

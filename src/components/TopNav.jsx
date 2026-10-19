@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   BarChart3, 
   Sparkles, 
@@ -8,7 +8,10 @@ import {
   Cpu,
   KeyRound,
   Loader2,
-  Cookie
+  Cookie,
+  CheckCircle2,
+  AlertCircle,
+  X
 } from 'lucide-react';
 import { MODES, SESSION_PARTITION } from '../constants';
 import CookieImportModal from './CookieImportModal';
@@ -16,6 +19,16 @@ import CookieImportModal from './CookieImportModal';
 export default function TopNav({ activeMode, setActiveMode, onReloadActive, onReloadAll }) {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isCookieModalOpen, setIsCookieModalOpen] = useState(false);
+  const [authStatus, setAuthStatus] = useState(null);
+
+  useEffect(() => {
+    if (authStatus) {
+      const timer = setTimeout(() => {
+        setAuthStatus(null);
+      }, 7000);
+      return () => clearTimeout(timer);
+    }
+  }, [authStatus]);
 
   const navItems = [
     {
@@ -44,16 +57,36 @@ export default function TopNav({ activeMode, setActiveMode, onReloadActive, onRe
   const handleGoogleLogin = async () => {
     if (window.electronAPI && window.electronAPI.openGoogleLogin) {
       setIsLoggingIn(true);
+      setAuthStatus(null);
       try {
-        await window.electronAPI.openGoogleLogin();
-        // Popup window closed. Reload webviews so all Google services immediately reflect login cookies!
-        if (onReloadAll) {
-          onReloadAll();
-        } else if (onReloadActive) {
-          onReloadActive();
+        const result = await window.electronAPI.openGoogleLogin();
+        if (result && result.loggedIn) {
+          setAuthStatus({
+            type: 'success',
+            message: 'Login Google berhasil! Sesi login terdeteksi dan tersimpan.',
+          });
+          if (onReloadAll) {
+            onReloadAll();
+          } else if (onReloadActive) {
+            onReloadActive();
+          }
+        } else if (result && result.success === false) {
+          setAuthStatus({
+            type: 'error',
+            message: result.error ? `Gagal memuat: ${result.error}` : 'Login Google gagal dimuat.',
+          });
+        } else {
+          setAuthStatus({
+            type: 'warning',
+            message: 'Popup login ditutup tanpa mendeteksi sesi Google aktif (SID). Jika diblokir Google, gunakan Import Cookies.',
+          });
         }
       } catch (err) {
         console.error('Failed to run Google login popup:', err);
+        setAuthStatus({
+          type: 'error',
+          message: err.message || 'Terjadi kesalahan saat membuka login Google.',
+        });
       } finally {
         setIsLoggingIn(false);
       }
@@ -182,6 +215,30 @@ export default function TopNav({ activeMode, setActiveMode, onReloadActive, onRe
           </button>
         </div>
       </header>
+
+      {/* Toast Notification for Google Login */}
+      {authStatus && (
+        <div className="fixed top-16 right-4 z-50 max-w-md animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className={`p-3 rounded-xl border shadow-xl flex items-start gap-2.5 text-xs ${
+            authStatus.type === 'success'
+              ? 'bg-emerald-950/90 border-emerald-800 text-emerald-200'
+              : authStatus.type === 'error'
+              ? 'bg-rose-950/90 border-rose-800 text-rose-200'
+              : 'bg-amber-950/90 border-amber-800 text-amber-200'
+          }`}>
+            {authStatus.type === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />}
+            {authStatus.type === 'error' && <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0 mt-0.5" />}
+            {authStatus.type === 'warning' && <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />}
+            <span className="flex-1 leading-relaxed">{authStatus.message}</span>
+            <button
+              onClick={() => setAuthStatus(null)}
+              className="p-1 rounded hover:bg-white/10 text-slate-400 hover:text-white transition"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Cookie Importer Modal */}
       <CookieImportModal
