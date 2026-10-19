@@ -1,36 +1,66 @@
-# Project Name: Creator & AI Pipeline Command Center
+# Project Context: Creator & AI Pipeline Command Center
 
-## Overview
-A desktop application built with Electron, React (Vite), and Tailwind CSS designed to eliminate context switching for a content creator. The app integrates YouTube Studio monitoring and a sequential AI content production pipeline (Claude -> ChatGPT -> Gemini & Google Flow) using persistent `<webview>` tags (No paid AI APIs used; relies on Free Tier Web UIs and DOM manipulation).
+## 1. System Overview
+Creator & AI Pipeline Command Center is a specialized desktop workstation built with **Electron, React (Vite), and Tailwind CSS**. It integrates a creator's video analytics and AI production pipeline into three persistent workspace modes, combining YouTube Studio, Claude, ChatGPT, Gemini, and Google Flow into a unified interface without context switching.
 
-## Tech Stack
-- Framework: Electron + React (Vite) + Tailwind CSS
-- Icons: Lucide-React
-- State Management & Storage: React State + localStorage (for saving Global Rules, Scene Cards, and Quota Timers)
-- Webviews: Electron `<webview>` with `partition="persist:clean_chrome_v3"` so login sessions and cookies are permanently saved.
+## 2. Technology Stack & Dependencies
+- **Runtime**: Electron `^34.2.0` (with Context Isolation, Process Sandboxing, and Webview Sandboxing)
+- **Frontend**: React `^18.3.1`, Vite `^6.1.0`, Tailwind CSS `^3.4.17`, Lucide React `^0.475.0`
+- **Testing**: Node.js Native Test Runner (`node:test`, `node:assert/strict`)
+- **Linting**: ESLint `^10.13.0` with `@eslint/js` and `globals`
+- **CI/CD**: GitHub Actions (`.github/workflows/ci.yml`) on Node `20.x` and `22.x`
 
-## Core Workflow & Layout (3 Workspace Modes)
-1. **Mode 1: Analytics & Ideation**
-   - Left (45%): Webview for YouTube Studio (`https://studio.youtube.com`)
-   - Right (55%): Webview for Claude (`https://claude.ai`) for research and storyboard creation.
-2. **Mode 2: Prompt Engineering**
-   - Left (45%): Webview for Claude (Storyboard reference)
-   - Center (10% / Collapsible Sidebar): Handoff & Parser Panel
-   - Right (45%): Webview for ChatGPT (`https://chatgpt.com`) to convert Storyboards into: (1) Global Rules, and (2) Scene-by-scene visual/animation prompts.
-3. **Mode 3: Visual Production Studio**
-   - Left Sidebar (25%): "Scene Cards Manager" containing the pinned Global Rules and individual Scene Cards (Scene 1, Scene 2, etc.).
-   - Main Area (75% Split): Webviews for Gemini (`https://gemini.google.com/app`) and Google Flow (`https://labs.google/fx/tools/flow`).
+## 3. Project Architecture
 
-## Key Technical Features
-1. **Persistent Webviews:** All webviews must remain mounted in the DOM (hidden via CSS `hidden` / `display: none` when switching modes) so background tasks like Google Flow rendering or active chats never reset.
-2. **Scene Parser:** A text area where the user pastes ChatGPT's output. The app parses it into:
-   - `Global Rules` (Editable, pinned at the top).
-   - `Scene Cards` (Array of scenes, each with Scene Number, Prompt Text, and Done status).
-3. **Gemini 4-Prompt Limit Handler (Auto-Fresh Session):**
-   - Tracks how many prompts have been injected into the current Gemini chat session (`geminiCounter`: 0 to 4).
-   - Each Scene Card has two injection buttons for Gemini:
-     - `[Inject Scene Only]`: Sends only the Scene prompt (used when `geminiCounter` is 1–3).
-     - `[New Chat + Global + Scene]`: Resets `geminiCounter` to 1, navigates Gemini webview to a fresh `https://gemini.google.com/app`, waits for load, and injects `Global Rules + Scene Prompt` together. Automatically highlighted/recommended every 4 scenes.
-   - Also includes an `[Inject to Flow]` button for Google Flow.
-4. **Bottom Status & Quota Bar:**
-   - Displays manual/semi-automatic message counters and cooldown countdown timers for Claude Free Tier and ChatGPT Free Tier, plus Gemini session load (`X/4`).
+### Workspace Modes & Webview Lifecycle
+All webviews are instantiated in the DOM within [`src/components/WebviewWrapper.jsx`](file:///d:/ai-mission-control/src/components/WebviewWrapper.jsx) with partition `persist:clean_chrome_v3`. Webviews are preserved across mode switches using Tailwind `hidden` classes rather than unmounting, ensuring active renders and session state remain uninterrupted:
+1. **Mode 1: Analytics & Ideation** — YouTube Studio (45%) + Claude (55%)
+2. **Mode 2: Prompt Engineering** — Claude (45%) + Pipeline Sidebar + ChatGPT (Flex-1)
+3. **Mode 3: Visual Production Studio** — Pipeline Sidebar (25%) + Gemini (Flex-1) + Google Flow (Flex-1)
+
+### Multi-Project Management & Storage Schema
+Located in [`src/utils/projectManager.js`](file:///d:/ai-mission-control/src/utils/projectManager.js):
+- **Schema Version**: `aimc_project_schema_v1`
+- **Storage Keys**:
+  - `aimc_projects_v1`: JSON array of versioned project models.
+  - `aimc_active_project_id_v1`: ID of currently active project.
+- **Project Structure**:
+  - `id`: Unique string (`proj-<timestamp>-<random>`)
+  - `name`: Non-empty string
+  - `createdAt`, `updatedAt`: ISO 8601 timestamps
+  - `globalRules`: String containing pinned system prompt/rules
+  - `scenes`: Array of scene cards:
+    - `id`: Unique string (`scene-<timestamp>-<index>`)
+    - `sceneNumber`: Positive integer
+    - `title`: String
+    - `prompt`: String
+    - `done`: Boolean
+- **Autosave & Backup**: Debounced local storage synchronization with export/import validation and seamless migration from legacy unversioned storage (`aimc_global_rules`, `aimc_scenes`).
+
+### Pipeline Engine & Prompt Delivery
+Located in [`src/components/PipelineSidebar.jsx`](file:///d:/ai-mission-control/src/components/PipelineSidebar.jsx) and [`src/utils/webviewInjection.js`](file:///d:/ai-mission-control/src/utils/webviewInjection.js):
+- **Scene Parser**: Robust regex parser supporting various Markdown heading formats, multiline prompts, and non-sequential numbers with interactive preview.
+- **Search & Filtering**: Real-time filtering across scene numbers, titles, and prompts.
+- **In-Flight Action Guard**: Disables buttons during prompt injection to prevent duplicate submissions.
+- **Delivery Engine**: Injects formatted prompt into target webview DOM. Automatically falls back to system clipboard with clear outcome states (`inserted`, `copied`, `failed`).
+
+### Security Framework
+Located in [`electron/security.js`](file:///d:/ai-mission-control/electron/security.js) and [`electron/main.js`](file:///d:/ai-mission-control/electron/main.js):
+- **Preload Isolation**: Exposes only frozen `openExternal` and `reloadApp` APIs.
+- **IPC Sender Verification**: Every handler verifies that the event sender matches `mainWindow.webContents`.
+- **Destination Allowlists**: Enforces approved service domains (`youtube.com`, `google.com`, `claude.ai`, `anthropic.com`, `chatgpt.com`, `openai.com`, `labs.google`).
+- **Permission Requests**: Blocks high-risk permissions (`geolocation`, `clipboard-read`, `notifications`); permits audio recording only on approved AI voice dictation origins.
+- **Missing Build Protection**: [`electron/startup.js`](file:///d:/ai-mission-control/electron/startup.js) catches production startups missing `dist/index.html` and presents actionable diagnostic guidance.
+
+## 4. Operational Commands & Scripts
+- `npm run dev`: Concurrent Vite dev server and Electron app.
+- `npm run build`: Vite production bundle compilation.
+- `npm start`: Electron production execution.
+- `npm test`: Node.js native test suite (`test/**/*.test.js`).
+- `npm run lint`: ESLint check.
+- `npm run verify`: Turnkey lint + test + build pipeline.
+
+## 5. Development Workflow & Git Rules
+- Work exclusively on dedicated feature branches (`feature/<task-name>`).
+- Direct commits or pushes to `main` are strictly forbidden.
+- Verify changes with `npm run verify` prior to opening pull requests.

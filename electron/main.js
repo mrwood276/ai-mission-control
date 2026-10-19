@@ -1,11 +1,11 @@
 const { app, BrowserWindow, session, ipcMain, shell } = require('electron');
 const path = require('path');
-const fs = require('fs');
 const {
   validateExternalUrl,
   isTrustedSender,
   isAllowedPermission,
 } = require('./security');
+const { resolveStartupTarget } = require('./startup');
 
 const PARTITION_NAME = 'persist:clean_chrome_v3';
 
@@ -142,7 +142,7 @@ function createWindow() {
         event.preventDefault();
       }
     } else {
-      if (!navigationUrl.startsWith('file:')) {
+      if (!navigationUrl.startsWith('file:') && !navigationUrl.startsWith('data:')) {
         event.preventDefault();
       }
     }
@@ -153,15 +153,21 @@ function createWindow() {
     return { action: 'deny' };
   });
 
-  if (isDev) {
-    mainWindow.loadURL(expectedDevOrigin);
+  const distPath = path.join(__dirname, '../dist/index.html');
+  const startup = resolveStartupTarget({
+    isDev,
+    distPath,
+    devOrigin: expectedDevOrigin,
+  });
+
+  if (startup.type === 'url') {
+    mainWindow.loadURL(startup.target);
+  } else if (startup.type === 'file') {
+    mainWindow.loadFile(startup.target);
   } else {
-    const distPath = path.join(__dirname, '../dist/index.html');
-    if (fs.existsSync(distPath)) {
-      mainWindow.loadFile(distPath);
-    } else {
-      mainWindow.loadURL(expectedDevOrigin);
-    }
+    console.error(`[Startup Error] Production build artifact missing at: ${startup.target}`);
+    console.error('[Startup Error] Run "npm run build" before starting in production mode, or run "npm run dev" for development.');
+    mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(startup.html)}`);
   }
 
   mainWindow.on('closed', () => {
