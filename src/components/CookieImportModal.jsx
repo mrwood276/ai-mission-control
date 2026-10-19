@@ -83,21 +83,36 @@ export default function CookieImportModal({ isOpen, onClose, onReloadAll }) {
 
       const result = await window.electronAPI.importCookies(cookieJson.trim());
       if (result.success) {
+        let isGoogleLogged = Boolean(result.googleLoginDetected);
+        if (!isGoogleLogged && typeof window.electronAPI.checkGoogleAuth === 'function') {
+          try {
+            const authCheck = await window.electronAPI.checkGoogleAuth();
+            isGoogleLogged = Boolean(authCheck.loggedIn);
+          } catch (e) {}
+        }
+
+        const failedList = result.failedCookies || [];
+        const hasFailed = failedList.length > 0;
+
         setStatus({
-          type: 'success',
-          message: `Berhasil menginjeksi ${result.count} cookies (${result.injected} total write across sessions)!`,
+          type: hasFailed ? 'warning' : 'success',
+          message: `Berhasil menginjeksi ${result.injected || result.count} cookies (${result.count} total).`,
           count: result.count,
+          failedCookies: failedList,
+          googleLoginDetected: isGoogleLogged,
         });
 
         // Reload all webviews so YouTube Studio / Gemini / Flow pick up login session immediately!
         setTimeout(() => {
           if (onReloadAll) onReloadAll();
-        }, 600);
+        }, 500);
 
-        // Close modal after brief feedback
-        setTimeout(() => {
-          onClose();
-        }, 1800);
+        // Auto close only if fully successful and Google login detected
+        if (!hasFailed && isGoogleLogged) {
+          setTimeout(() => {
+            onClose();
+          }, 2400);
+        }
       } else {
         setStatus({
           type: 'error',
@@ -155,9 +170,9 @@ export default function CookieImportModal({ isOpen, onClose, onReloadAll }) {
               </p>
             </div>
             <div className="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800 flex flex-col gap-1">
-              <span className="font-bold text-[11px] text-amber-400">Langkah 2: Export JSON</span>
+              <span className="font-bold text-[11px] text-amber-400">Langkah 2: Export JSON (Incognito)</span>
               <p className="text-[11px] text-slate-400 leading-relaxed">
-                Buka tab <b>youtube.com</b> & <b>google.com</b> yang sudah login, buka ekstensi, lalu klik <b>Export (JSON)</b>.
+                Buka <b>youtube.com</b> & <b>google.com</b> di jendela <b>Incognito</b>, klik <b>Export (JSON)</b>, lalu <b>langsung tutup jendelanya</b> (Google merotasi cookie di tab yang masih terbuka, jadi cookie cepat tidak valid).
               </p>
             </div>
             <div className="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800 flex flex-col gap-1">
@@ -228,10 +243,50 @@ export default function CookieImportModal({ isOpen, onClose, onReloadAll }) {
           />
 
           {/* Feedback Alerts */}
-          {status.type === 'success' && (
-            <div className="p-3 rounded-xl bg-emerald-950/60 border border-emerald-800/80 text-emerald-300 flex items-center gap-2.5 text-xs animate-in fade-in">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-              <span>{status.message} Menutup jendela dan me-reload webview...</span>
+          {(status.type === 'success' || status.type === 'warning') && (
+            <div className={`p-3 rounded-xl border flex flex-col gap-2 text-xs animate-in fade-in ${
+              status.type === 'success'
+                ? 'bg-emerald-950/60 border-emerald-800/80 text-emerald-300'
+                : 'bg-amber-950/60 border-amber-800/80 text-amber-300'
+            }`}>
+              <div className="flex items-center gap-2">
+                {status.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0" />
+                )}
+                <span className="font-medium">{status.message}</span>
+              </div>
+
+              {/* Status Login Google (Cek SID / __Secure-1PSID) */}
+              <div className="text-[11px] pl-6">
+                {status.googleLoginDetected ? (
+                  <span className="text-emerald-400 flex items-center gap-1 font-mono">
+                    ✓ Sesi Google terverifikasi aktif (SID / __Secure-1PSID terdeteksi di .google.com).
+                  </span>
+                ) : (
+                  <span className="text-amber-400 flex items-center gap-1 font-mono">
+                    ⚠️ Sesi Google belum terdeteksi (tidak ditemukan SID / __Secure-1PSID di .google.com). Pastikan export dilakukan dari akun yang sudah login.
+                  </span>
+                )}
+              </div>
+
+              {/* Daftar Cookie Gagal jika ada */}
+              {status.failedCookies && status.failedCookies.length > 0 && (
+                <div className="mt-1 pl-6">
+                  <div className="text-[11px] font-semibold text-rose-400 mb-1">
+                    Daftar Cookie Gagal ({status.failedCookies.length}):
+                  </div>
+                  <div className="max-h-24 overflow-y-auto space-y-0.5 bg-slate-950/70 p-2 rounded border border-slate-800 font-mono text-[10px] text-slate-300">
+                    {status.failedCookies.map((item, idx) => (
+                      <div key={idx} className="flex items-start gap-1.5">
+                        <span className="text-rose-400 font-bold">{item.name}:</span>
+                        <span className="text-slate-400">{item.reason}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

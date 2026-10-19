@@ -305,16 +305,48 @@ function createWindow() {
         console.warn('[Session] cookies.flushStore error:', flushErr);
       }
 
+      let googleLoginDetected = false;
+      try {
+        const googleCookies = await ses.cookies.get({ domain: '.google.com' });
+        googleLoginDetected = googleCookies.some(c => c.name === 'SID' || c.name === '__Secure-1PSID');
+        if (!googleLoginDetected) {
+          const allCookies = await ses.cookies.get({});
+          googleLoginDetected = allCookies.some(
+            c => (c.name === 'SID' || c.name === '__Secure-1PSID') && c.domain && c.domain.includes('google')
+          );
+        }
+      } catch (checkErr) {
+        console.warn('[Session] Could not verify Google login cookies:', checkErr);
+      }
+
       return {
         success: true,
         count: cookies.length,
         injected: injectedCount,
         failed: failedCookies.length,
         failedCookies,
+        googleLoginDetected,
       };
     } catch (err) {
       console.error('Failed to import cookies:', err);
       return { success: false, error: err.message || 'Gagal memproses JSON cookie.' };
+    }
+  });
+
+  ipcMain.handle('check-google-auth', async () => {
+    try {
+      const ses = session.fromPartition(PARTITION_NAME);
+      const googleCookies = await ses.cookies.get({ domain: '.google.com' });
+      const hasSid = googleCookies.some(c => c.name === 'SID' || c.name === '__Secure-1PSID');
+      if (hasSid) return { loggedIn: true };
+
+      const allCookies = await ses.cookies.get({});
+      const hasAny = allCookies.some(
+        c => (c.name === 'SID' || c.name === '__Secure-1PSID') && c.domain && c.domain.includes('google')
+      );
+      return { loggedIn: hasAny };
+    } catch (e) {
+      return { loggedIn: false, error: e.message };
     }
   });
 

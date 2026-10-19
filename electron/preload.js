@@ -11,6 +11,7 @@ const electronAPI = {
   stealthPreloadUrl,
   openGoogleLogin: () => ipcRenderer.invoke('open-google-login'),
   importCookies: (cookiesJson) => ipcRenderer.invoke('import-cookies', cookiesJson),
+  checkGoogleAuth: () => ipcRenderer.invoke('check-google-auth'),
   reloadApp: () => ipcRenderer.send('app:reload'),
 };
 
