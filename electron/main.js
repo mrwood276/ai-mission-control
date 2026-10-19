@@ -1,4 +1,4 @@
-const { app, BrowserWindow, session, ipcMain } = require('electron');
+const { app, BrowserWindow, session, ipcMain, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -324,6 +324,23 @@ function setupIpcHandlers() {
       return { loggedIn: hasAny };
     } catch (e) {
       return { loggedIn: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('open-external', async (_event, targetUrl) => {
+    try {
+      if (typeof targetUrl !== 'string') {
+        return { success: false, error: 'URL harus berupa string' };
+      }
+      const parsed = new URL(targetUrl);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        return { success: false, error: 'Hanya protokol http/https yang diizinkan' };
+      }
+      await shell.openExternal(targetUrl);
+      return { success: true };
+    } catch (err) {
+      console.error('[IPC] Failed to open external URL:', err);
+      return { success: false, error: err.message };
     }
   });
 

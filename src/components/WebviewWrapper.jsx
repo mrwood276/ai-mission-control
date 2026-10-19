@@ -76,8 +76,11 @@ export default function WebviewWrapper({
   };
 
   const handleOpenExternal = () => {
-    if (webviewRef.current && webviewRef.current.getURL) {
-      const liveUrl = webviewRef.current.getURL() || url;
+    const liveUrl = (webviewRef.current && webviewRef.current.getURL ? webviewRef.current.getURL() : '') || url;
+    if (!liveUrl) return;
+    if (window.electronAPI && typeof window.electronAPI.openExternal === 'function') {
+      window.electronAPI.openExternal(liveUrl);
+    } else {
       window.open(liveUrl, '_blank');
     }
   };

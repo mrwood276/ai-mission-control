@@ -91,7 +91,12 @@ export default function TopNav({ activeMode, setActiveMode, onReloadActive, onRe
         setIsLoggingIn(false);
       }
     } else {
-      window.open('https://accounts.google.com/ServiceLogin?hl=id', '_blank', 'width=650,height=750');
+      const authUrl = 'https://accounts.google.com/ServiceLogin?hl=id';
+      if (window.electronAPI && typeof window.electronAPI.openExternal === 'function') {
+        window.electronAPI.openExternal(authUrl);
+      } else {
+        window.open(authUrl, '_blank', 'width=650,height=750');
+      }
     }
   };
 

@@ -12,6 +12,7 @@ const electronAPI = {
   openGoogleLogin: () => ipcRenderer.invoke('open-google-login'),
   importCookies: (cookiesJson) => ipcRenderer.invoke('import-cookies', cookiesJson),
   checkGoogleAuth: () => ipcRenderer.invoke('check-google-auth'),
+  openExternal: (url) => ipcRenderer.invoke('open-external', url),
   reloadApp: () => ipcRenderer.send('app:reload'),
 };
 
